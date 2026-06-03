@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>ProctorVision</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Serif+Display&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="styles.css"/>
+
+</head>
+<body>
+
+<!-- ════════════════════════════════════════════
+     ROLE PICKER
+═════════════════════════════════════════════ -->
+<div id="role-screen">
+  <div style="text-align:center">
+    <h1>ProctorVision</h1>
+    <p>Select your portal to continue</p>
+  </div>
+  <div class="role-cards">
+    <div class="role-card teacher" onclick="enterPortal('teacher')">
+      <div class="rc-icon">Teacher</div>
+      <div class="rc-title">Teacher Portal</div>
+      <div class="rc-sub">Create &amp; manage assessments</div>
+    </div>
+    <div class="role-card student" onclick="enterPortal('student')">
+      <div class="rc-icon">Student</div>
+      <div class="rc-title">Student Portal</div>
+      <div class="rc-sub">Take exams &amp; view results</div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════
+     APP SHELL
+═════════════════════════════════════════════ -->
+<div id="app-shell">
+  <div class="topbar" id="topbar">
+    <div class="logo" id="topbar-logo">ProctorVision <span id="portal-label"></span></div>
+    <div style="display:flex;align-items:center;gap:.75rem">
+      <div class="user-pill">
+        <div class="avatar" id="user-avatar"></div>
+        <span id="user-name"></span>
+      </div>
+      <button class="switch-btn" onclick="switchPortal()">⇄ Switch Portal</button>
+    </div>
+  </div>
+
+  <div class="layout">
+    <nav class="sidebar" id="sidebar">
+      <!-- injected per role -->
+    </nav>
+    <main class="main" id="main-content">
+      <!-- injected per role -->
+    </main>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════
+     EXAM SHELL (student)
+═════════════════════════════════════════════ -->
+<div class="exam-shell" id="exam-shell">
+  <div id="intro-screen">
+    <div class="exam-topbar">
+      <div class="et-title" id="es-title">Exam Title</div>
+      <div class="camera-panel">
+        <span id="camera-status">Camera: waiting</span>
+        <span id="camera-alert" class="camera-alert"></span>
+      </div>
+      <button class="btn btn-ghost btn-sm" onclick="exitExam()">Exit</button>
+    </div>
+    <div id="camera-overlay" class="camera-overlay" style="display:none">
+      <div class="camera-overlay-card">
+        <h2>Camera required</h2>
+          <p id="camera-overlay-msg">Camera access is required to continue the exam. Please allow camera access and remove any obstruction from the lens.</p>
+          <div style="display:flex;gap:.5rem;justify-content:center;margin-top:1rem">
+            <button class="btn btn-primary" onclick="retryCameraAccess()">Retry camera access</button>
+            <button class="btn btn-ghost" onclick="testCameraOnce()">Test Camera</button>
+          </div>
+          <div style="margin-top:1rem;font-size:.85rem;color:var(--muted)" id="camera-diagnostics"></div>
+      </div>
+    </div>
+    <div id="camera-preview-box" style="display:flex;justify-content:center;margin-bottom:1rem;border-radius:12px;padding:6px;border:4px solid #f3f4f6">
+      <div id="camera-preview" style="display:flex;flex-direction:column;align-items:center;gap:.5rem">
+        <div class="camera-view">
+          <video id="camera-video" autoplay muted playsinline></video>
+          <canvas id="camera-canvas" width="320" height="240"></canvas>
+        </div>
+        <div id="camera-calibration" style="text-align:center;font-size:.95rem;color:var(--muted);width:320px">
+          <div id="calib-msg">Hold still while we detect your face…</div>
+          <div id="calib-status" style="margin-top:.4rem;font-weight:600;color:#f59e0b">Detecting…</div>
+          <div id="calib-progress" style="margin-top:.6rem;width:320px;height:10px;background:#eef2f7;border-radius:8px;overflow:hidden">
+            <div id="calib-progress-fill" style="width:0%;height:100%;background:#10b981;transition:width 150ms linear"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="exam-body">
+      <div class="exam-intro">
+        <h2 id="intro-title">Exam Title</h2>
+        <p id="intro-instructions" style="margin-top:.5rem"></p>
+        <div class="exam-meta">
+          <span>Questions: <strong id="intro-qcount"></strong></span>
+          <span>Time: <strong id="intro-time"></strong></span>
+          <span>Course: <strong id="intro-course"></strong></span>
+        </div>
+      </div>
+      <div style="background:var(--surface);border-radius:12px;border:1px solid var(--border);padding:1.25rem 1.5rem;margin-bottom:1.5rem">
+        <div style="font-weight:600;margin-bottom:.75rem">Before you start:</div>
+        <ul style="font-size:.87rem;color:var(--muted);line-height:1.9;padding-left:1.1rem">
+          <li>Read each question carefully before answering.</li>
+          <li>You cannot pause the timer once you begin.</li>
+          <li>Ensure you have a stable internet connection.</li>
+          <li>Submit before the timer runs out.</li>
+        </ul>
+      </div>
+      <div style="display:flex;justify-content:center">
+        <button id="start-btn" class="btn btn-primary" style="padding:.75rem 2.5rem;font-size:.95rem" onclick="beginExam()">Start Exam</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="questions-screen" style="display:none;flex-direction:column;flex:1">
+    <div class="exam-topbar">
+      <div class="et-title" id="qs-exam-title">Exam</div>
+      <div style="display:flex;align-items:center;gap:1rem">
+        <span id="proctoring-badge" style="display:none;align-items:center;gap:.35rem;font-size:.75rem;font-weight:600;color:#16a34a;background:#dcfce7;padding:.25rem .6rem;border-radius:999px">
+          <span style="width:7px;height:7px;border-radius:50%;background:#16a34a;display:inline-block"></span> ProctorVision active
+        </span>
+        <div style="font-size:.82rem;color:var(--muted)">Question <span id="q-progress">1/10</span></div>
+        <div class="timer" id="timer-display">60:00</div>
+      </div>
+    </div>
+    <div class="exam-body" style="flex:1">
+      <div id="q-progress-bar" style="margin-bottom:1.5rem">
+        <div style="display:flex;justify-content:space-between;font-size:.78rem;color:var(--muted);margin-bottom:.35rem">
+          <span>Progress</span><span id="q-prog-label">0 answered</span>
+        </div>
+        <div class="progress-bar"><div class="progress-fill" id="q-prog-fill" style="width:0%"></div></div>
+      </div>
+      <div id="question-area"></div>
+    </div>
+    <div class="exam-footer">
+      <button class="btn btn-ghost" id="btn-prev" onclick="prevQ()">Previous</button>
+      <button class="btn btn-ghost" id="btn-next" onclick="nextQ()">Next</button>
+      <button class="btn btn-primary" id="btn-submit" onclick="submitExam()" style="display:none">Submit Exam</button>
+    </div>
+  </div>
+
+  <div id="result-screen-wrap" style="overflow-y:auto;flex:1;display:none">
+    <div class="exam-topbar">
+      <div class="et-title">Exam Complete</div>
+      <button class="btn btn-ghost btn-sm" onclick="exitExam()">Back to Portal</button>
+    </div>
+    <div class="result-screen show" id="result-display">
+      <div class="result-circle" id="result-circle">
+        <div class="pct" id="result-pct">0%</div>
+        <div class="lbl">score</div>
+      </div>
+      <div style="text-align:center;margin-bottom:.5rem">
+        <div style="font-size:1.2rem;font-weight:600" id="result-verdict">Well done!</div>
+        <div style="font-size:.88rem;color:var(--muted);margin-top:.3rem" id="result-sub"></div>
+      </div>
+      <div class="answer-review" id="answer-review"></div>
+      <button class="btn btn-primary" style="margin-top:1.5rem" onclick="exitExam()">Return to Portal</button>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════
+     TEACHER MODALS
+═════════════════════════════════════════════ -->
+<div class="overlay" id="exam-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 id="exam-modal-title">Create Assessment</h2>
+      <button class="btn btn-ghost btn-sm" onclick="closeExamModal()">Close</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-row">
+        <div class="form-group"><label>Title *</label><input type="text" id="exam-title" placeholder="e.g. Midterm Exam"/></div>
+        <div class="form-group"><label>Type *</label>
+          <select id="exam-type"><option value="exam">Exam</option><option value="quiz">Quiz</option><option value="activity">Activity</option></select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Course *</label><select id="exam-course"><option value="">Select course...</option></select></div>
+        <div class="form-group"><label>Time Limit (minutes)</label><input type="number" id="exam-time" placeholder="e.g. 60" min="1"/></div>
+      </div>
+      <div class="form-group"><label>Instructions</label><textarea id="exam-instructions" placeholder="Enter instructions for students..."></textarea></div>
+      <hr style="border:none;border-top:1px solid var(--border);margin:1rem 0"/>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem">
+        <div style="font-weight:600;font-size:.9rem">Questions</div>
+        <button class="btn btn-ghost btn-sm" onclick="addQuestion()">Add Question</button>
+      </div>
+      <div id="questions-container"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeExamModal()">Cancel</button>
+      <button class="btn btn-ghost" onclick="saveExam('draft')">Save as Draft</button>
+      <button class="btn btn-primary" onclick="saveExam('published')">Publish</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="course-modal">
+  <div class="modal" style="width:440px">
+    <div class="modal-header"><h2>New Course</h2><button class="btn btn-ghost btn-sm" onclick="document.getElementById('course-modal').classList.remove('show')">Close</button></div>
+    <div class="modal-body">
+      <div class="form-group"><label>Course Name *</label><input type="text" id="c-name" placeholder="e.g. IT Fundamentals"/></div>
+      <div class="form-group"><label>Course Code</label><input type="text" id="c-code" placeholder="e.g. IT101"/></div>
+      <div class="form-group"><label>Description</label><textarea id="c-desc" placeholder="Brief description..."></textarea></div>
+      <div class="form-group"><label>Icon</label>
+        <select id="c-icon">
+          <option value="IT">Technology</option><option value="ENG">Engineering</option>
+          <option value="SCI">Science</option><option value="LIT">Literature</option>
+          <option value="ART">Arts</option><option value="BUS">Business</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="document.getElementById('course-modal').classList.remove('show')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveCourse()">Create Course</button>
+    </div>
+  </div>
+</div>
+
+<!-- session modal removed: monitoring is now exam-based and automatic -->
+
+<div class="overlay" id="proctor-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>ProctorVision Proctoring Report</h2>
+      <button class="btn btn-ghost btn-sm" onclick="closeProctorModal()">Close</button>
+    </div>
+    <div class="modal-body" id="proctor-modal-body">
+      <div class="empty-state"><div class="icon">Info</div><p>No report available.</p></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" id="proctor-pdf-btn" onclick="downloadBackendPdf()" style="display:none">Download PDF</button>
+      <button class="btn btn-primary" onclick="closeProctorModal()">Close</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<script src="app.js"></script>
+
+</body>
+</html>

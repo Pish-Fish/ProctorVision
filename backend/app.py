@@ -1,0 +1,337 @@
+"""
+ProctorVision Backend — Flask + SQLite + Socket.IO + Gemini + ReportLab
+Run:  python app.py
+Demo: http://127.0.0.1:5000/api/health
+"""
+
+import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+from flask import Flask, jsonify, request, send_file
+from flask_cors import CORS
+from flask_socketio import SocketIO, emit, join_room
+
+load_dotenv(Path(__file__).parent / ".env")
+
+import db
+from gemini_engine import generate_verdict
+from pdf_reports import build_incident_pdf
+from scoring import engine
+
+app = Flask(__name__)
+app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "proctorvision-demo-secret")
+CORS(app, resources={r"/api/*": {"origins": "*"}})
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
+
+db.init_db()
+
+
+def _resolve_session(session_id=None, submission_id=None):
+    if session_id:
+        return db.get_session(session_id)
+    if submission_id:
+        return db.get_session_by_submission(submission_id)
+    return None
+
+
+def _broadcast_live(event_payload, score_payload):
+    socketio.emit("live_event", event_payload, room="teachers")
+    socketio.emit("score_update", score_payload, room="teachers")
+
+
+@app.get("/api/health")
+def health():
+    return jsonify(
+        {
+            "status": "ok",
+            "service": "ProctorVision Backend",
+            "stack": ["Flask", "SQLite", "Socket.IO", "Gemini", "ReportLab"],
+            "gemini_configured": bool(
+                os.getenv("GEMINI_API_KEY", "").strip()
+                and os.getenv("GEMINI_API_KEY") != "your_gemini_api_key_here"
+            ),
+        }
+    )
+
+
+@app.post("/api/sessions/join")
+def session_join():
+    body = request.get_json(force=True, silent=True) or {}
+    session_id = body.get("session_id")
+    exam_id = body.get("exam_id")
+    student_name = body.get("student_name")
+    exam_title = body.get("exam_title", "")
+
+    if not all([session_id, exam_id, student_name]):
+        return jsonify({"error": "session_id, exam_id, and student_name required"}), 400
+
+    db.create_session(session_id, exam_id, exam_title, student_name)
+    payload = {
+        "session_id": session_id,
+        "exam_id": exam_id,
+        "exam_title": exam_title,
+        "student_name": student_name,
+        "suspicion_score": 0,
+        "risk_level": "low",
+    }
+    socketio.emit("session_joined", payload, room="teachers")
+    return jsonify({"ok": True, **payload})
+
+
+@app.post("/api/events")
+def ingest_event():
+    body = request.get_json(force=True, silent=True) or {}
+    session_id = body.get("session_id")
+    exam_id = body.get("exam_id")
+    student_name = body.get("student_name")
+    event_type = body.get("type") or body.get("event_type")
+    details = body.get("details", "")
+    weight = int(body.get("weight") or 8)
+
+    if not all([session_id, exam_id, student_name, event_type]):
+        return jsonify({"error": "Missing required event fields"}), 400
+
+    db.create_session(
+        session_id,
+        exam_id,
+        body.get("exam_title", ""),
+        student_name,
+    )
+    db.log_event(session_id, exam_id, student_name, event_type, details, weight)
+
+    score, added = engine.record(session_id, event_type, weight)
+    events = db.get_events(session_id)
+    risk_level = engine.risk_level(score)
+    db.update_risk_score(session_id, score, risk_level, len(events))
+
+    event_payload = {
+        "session_id": session_id,
+        "exam_id": exam_id,
+        "exam_title": body.get("exam_title", ""),
+        "student_name": student_name,
+        "type": event_type,
+        "details": details,
+        "weight": weight,
+        "added": added,
+        "time": body.get("time"),
+    }
+    score_payload = {
+        "session_id": session_id,
+        "exam_id": exam_id,
+        "student_name": student_name,
+        "suspicion_score": score,
+        "risk_level": risk_level,
+        "event_count": len(events),
+    }
+    _broadcast_live(event_payload, score_payload)
+
+    return jsonify({"ok": True, "suspicion_score": score, "risk_level": risk_level, "added": added})
+
+
+@app.post("/api/sessions/submit")
+def session_submit():
+    body = request.get_json(force=True, silent=True) or {}
+    session_id = body.get("session_id")
+    submission_id = body.get("submission_id")
+    score_val = body.get("score")
+    total = body.get("total")
+    pct = body.get("pct")
+
+    if not session_id or submission_id is None:
+        return jsonify({"error": "session_id and submission_id required"}), 400
+
+    db.submit_session(session_id, submission_id, score_val, total, pct)
+    events = db.get_events(session_id)
+    suspicion = engine.get_score(session_id) or engine.score_from_events(events)
+    risk_level = engine.risk_level(suspicion)
+    db.update_risk_score(session_id, suspicion, risk_level, len(events))
+
+    session = db.get_session(session_id) or {}
+    risk = db.get_risk_score(session_id) or {
+        "suspicion_score": suspicion,
+        "risk_level": risk_level,
+        "event_count": len(events),
+    }
+    narrative, source = generate_verdict(session, events, risk)
+    db.save_verdict(session_id, narrative, source)
+
+    alert = {
+        "session_id": session_id,
+        "submission_id": submission_id,
+        "student_name": session.get("student_name"),
+        "exam_title": session.get("exam_title"),
+        "suspicion_score": suspicion,
+        "risk_level": risk_level,
+        "summary": engine.summary(session_id, len(events)),
+        "ai_verdict": narrative,
+    }
+    socketio.emit("submission_alert", alert, room="teachers")
+
+    return jsonify(
+        {
+            "ok": True,
+            "suspicion_score": suspicion,
+            "risk_level": risk_level,
+            "summary": engine.summary(session_id, len(events)),
+            "ai_verdict": narrative,
+            "verdict_source": source,
+        }
+    )
+
+
+@app.get("/api/live/feed")
+def live_feed():
+    limit = int(request.args.get("limit", 30))
+    exam_id = request.args.get("exam_id")
+    if exam_id:
+        events = db.get_live_events_for_exam(exam_id, limit)
+    else:
+        events = db.get_recent_live_events(limit)
+    return jsonify({"events": events})
+
+
+@app.post("/api/teacher/flag")
+def teacher_flag():
+    body = request.get_json(force=True, silent=True) or {}
+    exam_id = body.get("exam_id")
+    student_name = body.get("student_name")
+    if not exam_id or not student_name:
+        return jsonify({"error": "exam_id and student_name required"}), 400
+
+    session = db.find_active_session(exam_id, student_name)
+    session_id = session["id"] if session else f"flag_{exam_id}_{student_name}"
+    if not session:
+        db.create_session(session_id, exam_id, body.get("exam_title", ""), student_name)
+
+    details = "Flagged by teacher for manual review"
+    weight = 20
+    db.log_event(session_id, exam_id, student_name, "teacher_flag", details, weight)
+    score, added = engine.record(session_id, "teacher_flag", weight)
+    events = db.get_events(session_id)
+    risk_level = engine.risk_level(score)
+    db.update_risk_score(session_id, score, risk_level, len(events))
+
+    event_payload = {
+        "session_id": session_id,
+        "exam_id": exam_id,
+        "student_name": student_name,
+        "type": "teacher_flag",
+        "details": details,
+        "weight": weight,
+        "added": added,
+    }
+    score_payload = {
+        "session_id": session_id,
+        "exam_id": exam_id,
+        "student_name": student_name,
+        "suspicion_score": score,
+        "risk_level": risk_level,
+        "event_count": len(events),
+    }
+    _broadcast_live(event_payload, score_payload)
+    return jsonify({"ok": True, "suspicion_score": score, "risk_level": risk_level})
+
+
+@app.get("/api/sessions/active")
+def active_sessions():
+    return jsonify({"sessions": db.get_active_sessions()})
+
+
+@app.get("/api/submissions/<submission_id>/report")
+def submission_report(submission_id):
+    session = db.get_session_by_submission(submission_id)
+    if not session:
+        return jsonify({"error": "Submission not found on backend"}), 404
+
+    session_id = session["id"]
+    events = db.get_events(session_id)
+    risk = db.get_risk_score(session_id) or {
+        "suspicion_score": engine.score_from_events(events),
+        "risk_level": "low",
+        "event_count": len(events),
+    }
+    risk["suspicion_score"] = risk.get("suspicion_score") or engine.score_from_events(events)
+    risk["risk_level"] = engine.risk_level(risk["suspicion_score"])
+
+    verdict_row = db.get_verdict(session_id)
+    refresh = request.args.get("refresh", "").lower() in ("1", "true", "yes")
+    if verdict_row and not refresh:
+        narrative = verdict_row["narrative"]
+        source = verdict_row.get("source", "template")
+        # Upgrade stale short/template verdicts when regenerating logic improves
+        if source == "template" and len(narrative) < 400:
+            narrative, source = generate_verdict(session, events, risk)
+            db.save_verdict(session_id, narrative, source)
+    else:
+        narrative, source = generate_verdict(session, events, risk)
+        db.save_verdict(session_id, narrative, source)
+
+    return jsonify(
+        {
+            "session": session,
+            "events": events,
+            "risk": risk,
+            "ai_verdict": narrative,
+            "verdict_source": source,
+            "summary": engine.summary(session_id, len(events)),
+        }
+    )
+
+
+@app.get("/api/submissions/<submission_id>/pdf")
+def submission_pdf(submission_id):
+    session = db.get_session_by_submission(submission_id)
+    if not session:
+        return jsonify({"error": "Submission not found on backend"}), 404
+
+    session_id = session["id"]
+    events = db.get_events(session_id)
+    risk = db.get_risk_score(session_id) or {
+        "suspicion_score": engine.score_from_events(events),
+        "risk_level": "low",
+        "event_count": len(events),
+    }
+    verdict_row = db.get_verdict(session_id)
+    if verdict_row:
+        narrative = verdict_row["narrative"]
+    else:
+        narrative, source = generate_verdict(session, events, risk)
+        db.save_verdict(session_id, narrative, source)
+
+    pdf_buffer = build_incident_pdf(session, events, risk, narrative)
+    filename = f"ProctorVision_Report_{submission_id}.pdf"
+    return send_file(
+        pdf_buffer,
+        mimetype="application/pdf",
+        as_attachment=True,
+        download_name=filename,
+    )
+
+
+@socketio.on("connect")
+def on_connect():
+    emit("connected", {"message": "ProctorVision backend connected"})
+
+
+@socketio.on("join_role")
+def on_join_role(data):
+    role = (data or {}).get("role", "student")
+    room = "teachers" if role == "teacher" else "students"
+    join_room(room)
+    emit("joined", {"role": role, "room": room})
+
+
+@socketio.on("proctor_event")
+def on_proctor_event(data):
+    """Optional direct socket ingest (mirrors REST /api/events)."""
+    if not data:
+        return
+    with app.test_request_context(json=data):
+        ingest_event()
+
+
+if __name__ == "__main__":
+    print("ProctorVision Backend starting on http://127.0.0.1:5000")
+    print("Stack: Flask | SQLite | Socket.IO | Gemini | ReportLab")
+    socketio.run(app, host="0.0.0.0", port=5000, debug=True, allow_unsafe_werkzeug=True)
