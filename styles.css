@@ -21,6 +21,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 .role-card .rc-sub{font-size:.8rem;color:var(--muted);margin-top:.25rem}
 .role-card.teacher:hover{border-color:#6366f1}
 .role-card.student:hover{border-color:#16a34a}
+.role-card.admin:hover{border-color:#e11d48}
 
 /* ── APP SHELL ── */
 #app-shell{display:none;flex-direction:column;flex:1}

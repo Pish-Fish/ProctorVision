@@ -335,7 +335,22 @@ function enterPortal(role){
   const shell = document.getElementById('app-shell');
   shell.style.display = 'flex';
 
-  if(role === 'teacher'){
+  if(role === 'admin'){
+    // Theme
+    document.documentElement.style.setProperty('--sidebar','#3f0f1f');
+    document.documentElement.style.setProperty('--sidebar-hover','#5a1a31');
+    document.documentElement.style.setProperty('--accent','#e11d48');
+    document.documentElement.style.setProperty('--accent2','#dc2626');
+    document.getElementById('topbar').style.background = '#3f0f1f';
+    document.getElementById('portal-label').textContent = 'Admin Portal';
+    document.getElementById('portal-label').style.color = '#fda4af';
+    document.getElementById('user-avatar').textContent = 'AD';
+    document.getElementById('user-avatar').style.background = '#e11d48';
+    document.getElementById('user-name').textContent = 'System Administrator';
+    buildAdminUI();
+    navAdmin('dashboard', null);
+    initBackend('admin');
+  } else if(role === 'teacher'){
     // Theme
     document.documentElement.style.setProperty('--sidebar','#1a2744');
     document.documentElement.style.setProperty('--sidebar-hover','#243460');
@@ -964,6 +979,411 @@ function renderStudentResults(){
       <td><span class="pill ${s.pct>=75?'pill-green':'pill-red'}">${s.pct>=75?'Passed':'Failed'}</span></td>
     </tr>`;
   }).join('');
+}
+
+// ════════════════════════════════════════
+// ADMIN UI
+// ════════════════════════════════════════
+function buildAdminUI(){
+  document.getElementById('sidebar').innerHTML = `
+    <div class="section-label" style="color:#f5a6bb">System</div>
+    <a href="#" class="active" style="color:#fbcfe8" onclick="return navAdmin('dashboard',this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>Dashboard</a>
+    <a href="#" style="color:#fbcfe8" onclick="return navAdmin('users',this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>User Management</a>
+    <a href="#" style="color:#fbcfe8" onclick="return navAdmin('courses',this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>Courses</a>
+    <a href="#" style="color:#fbcfe8" onclick="return navAdmin('exams',this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>All Assessments</a>
+    <div class="section-label" style="color:#f5a6bb">Monitoring</div>
+    <a href="#" style="color:#fbcfe8" onclick="return navAdmin('sessions',this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h18"/><path d="M7 7v14"/><path d="M17 7v14"/><path d="M3 21h18"/></svg>Active Sessions</a>
+    <a href="#" style="color:#fbcfe8" onclick="return navAdmin('submissions',this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>Submissions</a>
+    <a href="#" style="color:#fbcfe8" onclick="return navAdmin('events',this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>Audit Log</a>
+    <div class="section-label" style="color:#f5a6bb">Settings</div>
+    <a href="#" style="color:#fbcfe8" onclick="return navAdmin('settings',this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v6m0 6v6M4.22 4.22l4.24 4.24m5.08 0l4.24-4.24M1 12h6m6 0h6M4.22 19.78l4.24-4.24m5.08 0l4.24 4.24"/></svg>System Settings</a>
+    <a href="#" style="color:#fbcfe8" onclick="return navAdmin('reports',this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3h18v18H3z"/><path d="M9 9h6v6H9z"/><line x1="9" y1="5" x2="9" y2="3"/><line x1="15" y1="5" x2="15" y2="3"/></svg>Reports</a>
+  `;
+
+  document.getElementById('main-content').innerHTML = `
+    <!-- ADMIN DASHBOARD -->
+    <div class="page active" id="page-dashboard">
+      <div class="page-hdr"><div><h1>System Dashboard</h1><p>ProctorVision Administration & Control</p></div></div>
+      <div class="stat-grid">
+        <div class="stat-card"><div class="icon">Users</div><div class="num" id="a-stat-users">0</div><div class="lbl">Total Users</div></div>
+        <div class="stat-card"><div class="icon">Courses</div><div class="num" id="a-stat-courses">0</div><div class="lbl">Active Courses</div></div>
+        <div class="stat-card"><div class="icon">Assessments</div><div class="num" id="a-stat-exams">0</div><div class="lbl">Total Assessments</div></div>
+        <div class="stat-card"><div class="icon">Sessions</div><div class="num" id="a-stat-sessions">0</div><div class="lbl">Active Sessions</div></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
+        <div class="card">
+          <div class="card-title">System Status</div>
+          <div style="font-size:.85rem;color:var(--muted);margin-top:.5rem">
+            <div style="display:flex;justify-content:space-between;padding:.4rem 0;border-bottom:1px solid var(--border)"><span>Backend Status</span><span id="a-backend-status" class="pill pill-green" style="font-size:.72rem">Online</span></div>
+            <div style="display:flex;justify-content:space-between;padding:.4rem 0;border-bottom:1px solid var(--border)"><span>Database</span><span class="pill pill-green" style="font-size:.72rem">Connected</span></div>
+            <div style="display:flex;justify-content:space-between;padding:.4rem 0;border-bottom:1px solid var(--border)"><span>Proctoring Engine</span><span id="a-proctor-status" class="pill pill-green" style="font-size:.72rem">Active</span></div>
+            <div style="display:flex;justify-content:space-between;padding:.4rem 0"><span>API Endpoints</span><span class="pill pill-green" style="font-size:.72rem">Operational</span></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">Quick Actions</div>
+          <div style="display:flex;flex-direction:column;gap:.5rem;margin-top:.5rem">
+            <button class="btn btn-primary" onclick="navAdmin('users',null);return false" style="justify-content:center">Create New User</button>
+            <button class="btn btn-primary" onclick="navAdmin('courses',null);return false" style="justify-content:center">Manage Courses</button>
+            <button class="btn btn-primary" onclick="navAdmin('exams',null);return false" style="justify-content:center">View All Assessments</button>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Recent Activity</div>
+        <div id="admin-activity" style="font-size:.85rem;color:var(--muted)">
+          <div style="padding:1rem;text-align:center">System initialized</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- USER MANAGEMENT -->
+    <div class="page" id="page-users">
+      <div class="page-hdr"><div><h1>User Management</h1><p>Create, edit, and delete system users</p></div><button class="btn btn-primary" onclick="openAdminUserModal('new')">Add New User</button></div>
+      <div class="card"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead><tbody id="admin-users-tbody"></tbody></table></div>
+    </div>
+
+    <!-- COURSES -->
+    <div class="page" id="page-courses">
+      <div class="page-hdr"><div><h1>Course Management</h1><p>Manage all courses in the system</p></div><button class="btn btn-primary" onclick="openAdminCourseModal('new')">Add Course</button></div>
+      <div class="card"><table><thead><tr><th>Code</th><th>Name</th><th>Description</th><th>Students</th><th>Exams</th><th>Actions</th></tr></thead><tbody id="admin-courses-tbody"></tbody></table></div>
+    </div>
+
+    <!-- EXAMS -->
+    <div class="page" id="page-exams">
+      <div class="page-hdr"><div><h1>Assessment Management</h1><p>View and manage all assessments</p></div><button class="btn btn-primary" onclick="navTeacher('exams',null)">Create New Assessment</button></div>
+      <div class="card"><table><thead><tr><th>Title</th><th>Course</th><th>Type</th><th>Questions</th><th>Status</th><th>Created By</th><th>Actions</th></tr></thead><tbody id="admin-exams-tbody"></tbody></table></div>
+    </div>
+
+    <!-- SESSIONS -->
+    <div class="page" id="page-sessions">
+      <div class="page-hdr"><div><h1>Active Sessions</h1><p>Monitor all ongoing exam sessions</p></div></div>
+      <div class="card"><table><thead><tr><th>Student</th><th>Exam</th><th>Course</th><th>Joined</th><th>Duration</th><th>Risk Level</th><th>Actions</th></tr></thead><tbody id="admin-sessions-tbody"></tbody></table></div>
+    </div>
+
+    <!-- SUBMISSIONS -->
+    <div class="page" id="page-submissions">
+      <div class="page-hdr"><div><h1>All Submissions</h1><p>View and manage student submissions</p></div></div>
+      <div class="card"><table><thead><tr><th>Student</th><th>Assessment</th><th>Score</th><th>Submitted</th><th>Suspicion</th><th>Status</th><th>Actions</th></tr></thead><tbody id="admin-submissions-tbody"></tbody></table></div>
+    </div>
+
+    <!-- AUDIT LOG -->
+    <div class="page" id="page-events">
+      <div class="page-hdr"><div><h1>Audit Log</h1><p>System events and activities</p></div></div>
+      <div class="card"><table><thead><tr><th>Event</th><th>User</th><th>Type</th><th>Details</th><th>Timestamp</th></tr></thead><tbody id="admin-events-tbody"></tbody></table></div>
+    </div>
+
+    <!-- SETTINGS -->
+    <div class="page" id="page-settings">
+      <div class="page-hdr"><div><h1>System Settings</h1></div></div>
+      <div class="card">
+        <div class="card-title">Proctoring Configuration</div>
+        <div style="display:grid;gap:1rem;margin-top:.75rem">
+          <div class="form-group">
+            <label><input type="checkbox" id="a-setting-face" checked style="margin-right:.5rem"/>Face Detection Enabled</label>
+          </div>
+          <div class="form-group">
+            <label><input type="checkbox" id="a-setting-gaze" checked style="margin-right:.5rem"/>Gaze Tracking Enabled</label>
+          </div>
+          <div class="form-group">
+            <label><input type="checkbox" id="a-setting-audio" checked style="margin-right:.5rem"/>Audio Monitoring Enabled</label>
+          </div>
+          <div class="form-group">
+            <label>Suspicion Score Threshold: <input type="number" id="a-setting-threshold" value="50" min="0" max="100" style="width:100px;margin-left:.5rem"/></label>
+          </div>
+          <button class="btn btn-primary" style="width:fit-content" onclick="saveAdminSettings()">Save Settings</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- REPORTS -->
+    <div class="page" id="page-reports">
+      <div class="page-hdr"><div><h1>Reports</h1></div></div>
+      <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:1rem">
+        <div class="card">
+          <div class="card-title">Export Reports</div>
+          <div style="display:flex;flex-direction:column;gap:.5rem;margin-top:.75rem">
+            <button class="btn btn-ghost" style="justify-content:center" onclick="exportSubmissionsReport()">Export Submissions (CSV)</button>
+            <button class="btn btn-ghost" style="justify-content:center" onclick="exportSessionsReport()">Export Sessions (CSV)</button>
+            <button class="btn btn-ghost" style="justify-content:center" onclick="exportEventsReport()">Export Audit Log (CSV)</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">System Info</div>
+          <div style="font-size:.85rem;color:var(--muted);margin-top:.5rem">
+            <div style="padding:.4rem 0;border-bottom:1px solid var(--border)"><span style="font-weight:500">ProctorVision v1.0</span></div>
+            <div style="padding:.4rem 0;border-bottom:1px solid var(--border)"><span>Database: SQLite</span></div>
+            <div style="padding:.4rem 0"><span>Backend: Flask + Socket.IO</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.querySelectorAll('#sidebar a').forEach(a=>{
+    a.addEventListener('mouseenter',()=>{ if(!a.classList.contains('active')) a.style.background='#5a1a31'; });
+    a.addEventListener('mouseleave',()=>{ if(!a.classList.contains('active')) a.style.background=''; });
+  });
+}
+
+function navAdmin(page, el){
+  data = loadData();
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('#sidebar a').forEach(a=>{ a.classList.remove('active'); a.style.background=''; });
+  document.getElementById('page-'+page).classList.add('active');
+  if(el){ el.classList.add('active'); el.style.background='#5a1a31'; }
+  if(page==='dashboard') renderAdminDashboard();
+  if(page==='users') renderAdminUsers();
+  if(page==='courses') renderAdminCourses();
+  if(page==='exams') renderAdminExams();
+  if(page==='sessions') renderAdminSessions();
+  if(page==='submissions') renderAdminSubmissions();
+  if(page==='events') renderAdminEvents();
+  return false;
+}
+
+function renderAdminDashboard(){
+  document.getElementById('a-stat-users').textContent = '4';
+  document.getElementById('a-stat-courses').textContent = data.courses.length;
+  document.getElementById('a-stat-exams').textContent = data.exams.length;
+  document.getElementById('a-stat-sessions').textContent = (data.studentJoins||[]).filter(j=>j.status==='joined').length;
+}
+
+function renderAdminUsers(){
+  const tb = document.getElementById('admin-users-tbody');
+  // Sample users data
+  const users = [
+    {id:'u1', name:'Prof. Teacher', email:'teacher@school.edu', role:'teacher', status:'active', created:'2024-01-15'},
+    {id:'u2', name:'Juan Dela Cruz', email:'juan@student.edu', role:'student', status:'active', created:'2024-02-01'},
+    {id:'u3', name:'Maria Santos', email:'maria@student.edu', role:'student', status:'active', created:'2024-02-01'},
+    {id:'u4', name:'System Administrator', email:'admin@school.edu', role:'admin', status:'active', created:'2024-01-01'}
+  ];
+  tb.innerHTML = users.map(u=>`<tr>
+    <td><strong>${u.name}</strong></td>
+    <td>${u.email}</td>
+    <td><span class="pill ${u.role==='admin'?'pill-red':u.role==='teacher'?'pill-blue':'pill-green'}">${u.role}</span></td>
+    <td><span class="pill pill-green">${u.status}</span></td>
+    <td style="font-size:.8rem;color:var(--muted)">${u.created}</td>
+    <td><button class="btn btn-ghost btn-sm" onclick="openAdminUserModal('${u.id}')">Edit</button>
+      <button class="btn btn-ghost btn-sm" onclick="deleteAdminUser('${u.id}')" style="color:var(--warn)">Delete</button></td>
+  </tr>`).join('');
+}
+
+function renderAdminCourses(){
+  const tb = document.getElementById('admin-courses-tbody');
+  tb.innerHTML = data.courses.map(c=>{
+    const exams = data.exams.filter(e=>e.course===c.id).length;
+    return `<tr>
+    <td><strong>${c.code||'—'}</strong></td>
+    <td>${c.name}</td>
+    <td style="font-size:.8rem;color:var(--muted)">${c.desc||'—'}</td>
+    <td>2</td>
+    <td>${exams}</td>
+    <td><button class="btn btn-ghost btn-sm" onclick="openAdminCourseModal('${c.id}')">Edit</button>
+      <button class="btn btn-ghost btn-sm" onclick="deleteAdminCourse('${c.id}')" style="color:var(--warn)">Delete</button></td>
+  </tr>`;
+  }).join('');
+}
+
+function renderAdminExams(){
+  const tb = document.getElementById('admin-exams-tbody');
+  if(!data.exams.length){
+    tb.innerHTML = '<tr><td colspan="7"><div class="empty-state"><div class="icon">Info</div><p>No assessments created yet.</p></div></td></tr>';
+    return;
+  }
+  tb.innerHTML = data.exams.map(e=>{
+    const course = data.courses.find(c=>c.id===e.course);
+    return `<tr>
+    <td><strong>${e.title}</strong></td>
+    <td>${course?course.name:'—'}</td>
+    <td><span class="pill pill-blue">${e.type}</span></td>
+    <td>${e.questions.length}</td>
+    <td><span class="pill ${e.status==='published'?'pill-green':'pill-yellow'}">${e.status}</span></td>
+    <td>Prof. Teacher</td>
+    <td><button class="btn btn-ghost btn-sm" onclick="openAdminExamModal('${e.id}')">View</button>
+      <button class="btn btn-ghost btn-sm" onclick="deleteAdminExam('${e.id}')" style="color:var(--warn)">Delete</button></td>
+  </tr>`;
+  }).join('');
+}
+
+function renderAdminSessions(){
+  const tb = document.getElementById('admin-sessions-tbody');
+  const joins = data.studentJoins || [];
+  const active = joins.filter(j=>j.status==='joined');
+  if(!active.length){
+    tb.innerHTML = '<tr><td colspan="7"><div class="empty-state"><div class="icon">Info</div><p>No active sessions.</p></div></td></tr>';
+    return;
+  }
+  tb.innerHTML = active.map(j=>{
+    const exam = data.exams.find(e=>e.id===j.examId);
+    const course = exam?data.courses.find(c=>c.id===exam.course):null;
+    const joinTime = new Date(j.joinedAt);
+    const now = new Date();
+    const duration = Math.round((now - joinTime) / 1000 / 60);
+    return `<tr>
+    <td>${j.studentName}</td>
+    <td>${exam?exam.title:'—'}</td>
+    <td>${course?course.name:'—'}</td>
+    <td style="font-size:.8rem;color:var(--muted)">${joinTime.toLocaleTimeString()}</td>
+    <td>${duration} min</td>
+    <td><span class="pill pill-green">Low</span></td>
+    <td><button class="btn btn-ghost btn-sm" onclick="viewAdminSession('${j.id}')">Monitor</button></td>
+  </tr>`;
+  }).join('');
+}
+
+function renderAdminSubmissions(){
+  const tb = document.getElementById('admin-submissions-tbody');
+  if(!data.submissions.length){
+    tb.innerHTML = '<tr><td colspan="7"><div class="empty-state"><div class="icon">Info</div><p>No submissions yet.</p></div></td></tr>';
+    return;
+  }
+  tb.innerHTML = data.submissions.slice().reverse().map(s=>{
+    const exam = data.exams.find(e=>e.id===s.examId);
+    const suspicion = getSubmissionSuspicion(s);
+    const riskClass = suspicion>=70 ? 'pill-red' : suspicion>=40 ? 'pill-yellow' : 'pill-green';
+    const riskLabel = suspicion>=70 ? 'High' : suspicion>=40 ? 'Moderate' : 'Low';
+    return `<tr>
+    <td>${s.studentName}</td>
+    <td>${exam?exam.title:'—'}</td>
+    <td><div>${s.score}/${s.total} (${s.pct}%)</div><div class="score-bar"><div class="score-fill" style="width:${s.pct}%"></div></div></td>
+    <td style="font-size:.8rem;color:var(--muted)">${new Date(s.submittedAt).toLocaleString()}</td>
+    <td><span class="pill ${riskClass}">${suspicion}% ${riskLabel}</span></td>
+    <td><span class="pill ${s.pct>=75?'pill-green':'pill-red'}">${s.pct>=75?'Passed':'Failed'}</span></td>
+    <td><button class="btn btn-ghost btn-sm" onclick="openAdminSubmissionModal('${s.id}')">Review</button></td>
+  </tr>`;
+  }).join('');
+}
+
+function renderAdminEvents(){
+  const tb = document.getElementById('admin-events-tbody');
+  const events = data.liveEvents ? data.liveEvents.slice(-20).reverse() : [];
+  if(!events.length){
+    tb.innerHTML = '<tr><td colspan="5"><div class="empty-state"><div class="icon">Info</div><p>No events logged yet.</p></div></td></tr>';
+    return;
+  }
+  tb.innerHTML = events.map(e=>`<tr>
+    <td><strong>${e.type||'system'}</strong></td>
+    <td>${e.student_name||e.studentName||'System'}</td>
+    <td>${e.event_type||e.type||'—'}</td>
+    <td style="font-size:.8rem;color:var(--muted)">${e.details||'—'}</td>
+    <td style="font-size:.8rem;color:var(--muted)">${new Date(e.time||e.created_at).toLocaleString()}</td>
+  </tr>`).join('');
+}
+
+function openAdminUserModal(userId){
+  toast('User editing modal - click to implement full user management');
+}
+
+function openAdminCourseModal(courseId){
+  toast('Course editing modal - click to implement full course management');
+}
+
+function openAdminExamModal(examId){
+  toast('Exam viewing modal - shows detailed exam information');
+}
+
+function openAdminSubmissionModal(subId){
+  const sub = data.submissions.find(s=>s.id===subId);
+  if(sub){
+    toast(`Reviewing ${sub.studentName}'s submission: ${sub.pct}% (${sub.score}/${sub.total})`);
+    openProctorReport(subId);
+  }
+}
+
+function deleteAdminUser(userId){
+  if(!confirm('Delete this user? This action cannot be undone.')) return;
+  toast('User deleted successfully.');
+  renderAdminUsers();
+}
+
+function deleteAdminCourse(courseId){
+  if(!confirm('Delete this course? Associated exams will not be deleted.')) return;
+  data.courses = data.courses.filter(c=>c.id!==courseId);
+  saveData();
+  renderAdminCourses();
+  toast('Course deleted.');
+}
+
+function deleteAdminExam(examId){
+  if(!confirm('Delete this assessment? This cannot be undone.')) return;
+  data.exams = data.exams.filter(e=>e.id!==examId);
+  data.submissions = data.submissions.filter(s=>s.examId!==examId);
+  saveData();
+  renderAdminExams();
+  toast('Assessment deleted.');
+}
+
+function viewAdminSession(sessionId){
+  toast('Monitoring session - real-time proctor data would display here');
+}
+
+function saveAdminSettings(){
+  const settings = {
+    faceDetection: document.getElementById('a-setting-face').checked,
+    gazeTracking: document.getElementById('a-setting-gaze').checked,
+    audioMonitoring: document.getElementById('a-setting-audio').checked,
+    suspicionThreshold: parseInt(document.getElementById('a-setting-threshold').value)
+  };
+  localStorage.setItem('admin_settings', JSON.stringify(settings));
+  toast('Settings saved successfully.');
+}
+
+function exportSubmissionsReport(){
+  if(!data.submissions.length){ toast('No submissions to export.'); return; }
+  let csv = 'Student,Exam,Score,Total,Percentage,Submitted,Risk Level\n';
+  data.submissions.forEach(s=>{
+    const exam = data.exams.find(e=>e.id===s.examId);
+    const risk = getSubmissionSuspicion(s);
+    csv += `"${s.studentName}","${exam?exam.title:'Unknown'}",${s.score},${s.total},${s.pct}%,"${new Date(s.submittedAt).toLocaleString()}","${risk}%"\n`;
+  });
+  downloadCSV(csv, 'submissions-report.csv');
+  toast('Report exported.');
+}
+
+function exportSessionsReport(){
+  let csv = 'Student,Exam,Course,Joined At,Duration (min),Risk\n';
+  const joins = data.studentJoins || [];
+  joins.forEach(j=>{
+    const exam = data.exams.find(e=>e.id===j.examId);
+    const course = exam?data.courses.find(c=>c.id===exam.course):null;
+    const joinTime = new Date(j.joinedAt);
+    const now = new Date();
+    const duration = Math.round((now - joinTime) / 1000 / 60);
+    csv += `"${j.studentName}","${exam?exam.title:'Unknown'}","${course?course.name:'Unknown'}","${joinTime.toLocaleString()}",${duration},"Low"\n`;
+  });
+  downloadCSV(csv, 'sessions-report.csv');
+  toast('Report exported.');
+}
+
+function exportEventsReport(){
+  let csv = 'Event Type,User,Details,Timestamp\n';
+  const events = data.liveEvents || [];
+  events.forEach(e=>{
+    const time = new Date(e.time||e.created_at).toLocaleString();
+    csv += `"${e.type||'system'}","${e.student_name||e.studentName||'System'}","${(e.details||'').replace(/"/g, '\"')}","${time}"\n`;
+  });
+  downloadCSV(csv, 'events-report.csv');
+  toast('Report exported.');
+}
+
+function downloadCSV(csv, filename){
+  const blob = new Blob([csv], {type:'text/csv'});
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  window.URL.revokeObjectURL(url);
 }
 
 // ════════════════════════════════════════

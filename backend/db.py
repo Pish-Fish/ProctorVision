@@ -253,3 +253,37 @@ def get_live_events_for_exam(exam_id, limit=50):
             (exam_id, limit),
         ).fetchall()
         return [dict(r) for r in rows]
+
+
+def get_all_sessions():
+    """Get all exam sessions (for admin)."""
+    with get_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT s.*, r.suspicion_score, r.risk_level, r.event_count
+            FROM exam_sessions s
+            LEFT JOIN risk_scores r ON r.session_id = s.id
+            ORDER BY s.joined_at DESC
+            """
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_all_events():
+    """Get all events across all sessions (for admin)."""
+    with get_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT * FROM event_logs
+            ORDER BY created_at DESC
+            LIMIT 1000
+            """
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def execute(query, params=()):
+    """Execute a query for admin operations."""
+    with get_db() as conn:
+        conn.execute(query, params)
+
