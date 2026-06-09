@@ -519,7 +519,6 @@ def admin_update_settings():
     settings = {
         "face_detection": body.get("face_detection", True),
         "gaze_tracking": body.get("gaze_tracking", True),
-        "audio_monitoring": body.get("audio_monitoring", True),
         "suspicion_threshold": body.get("suspicion_threshold", 50),
         "updated": db.utcnow()
     }

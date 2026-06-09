@@ -12,7 +12,7 @@ let monitorInterval = null, monitorExamId = null;
 // Live event buffering to reduce localStorage churn
 let liveEventBuffer = [];
 let liveEventFlushTimer = null;
-const LIVE_EVENT_FLUSH_MS = 2000;
+const LIVE_EVENT_FLUSH_MS = 150;
 const BACKEND_URL = 'http://127.0.0.1:5000';
 let backendSocket = null;
 let backendSessionId = null;
@@ -23,12 +23,14 @@ let currentReportSubmissionId = null;
 
 // Exam-taking state
 let activeExam = null, answers = {}, currentQ = 0, timerInterval = null, timeLeft = 0;
-let cameraStream = null, cameraAnalysisHandle = null, cameraAnalysisInFlight = false, audioContext = null, analyserNode = null, audioDataArray = null, lastFrameData = null;
-let audioAvailable = false;
+let cameraStream = null, cameraAnalysisHandle = null, cameraAnalysisInFlight = false, lastFrameData = null;
 let faceDetector = null, examPausedDueCamera = false, pauseReason = '';
 let gazeHistory = [];
 let lastFaceAspect = null;
 let lastFaceAreaRatio = null;
+let lastFaceCenterX = null;
+let lastFaceCenterY = null;
+let lastDetectedFaceBox = null;
 // Gaze + motion tuning (added to reduce false positives)
 let lastMotionFrame = null;
 let motionHistory = [];
@@ -38,28 +40,40 @@ const motionLowThreshold = 0.007; // below this => stable
 let isHighMotion = false;
 let motionLevel = 0;
 
-const gazeAwayConsecutiveRequired = 3; // require fewer consecutive "away" frames for better detection
-const gazeAwayThreshold = 0.58; // per-frame away confidence threshold
+const gazeAwayConsecutiveRequired = 2; // flag faster for clear off-screen behavior
+const gazeAwayThreshold = 0.62; // require stronger away confidence to avoid minor head shifts
 let gazeAwayConsecutive = 0;
 let lastGazeState = 'on';
 // Scoring and robustness tuning
 const PROCTOR_WEIGHT_MULTIPLIER = 0.6; // reduce raw weights to make scoring less aggressive
 const EVENT_COOLDOWN_MS = 10000; // ignore identical events for this duration to avoid rapid repeats
-const GAZE_UNCERTAIN_REQUIRED = 5; // require more sustained fallback evidence
+const DEVICE_EVENT_COOLDOWN_MS = 4000; // suppress noisy repeated restricted-object alerts
+const DEVICE_DARK_THRESHOLD = 85; // detect darker phone cases, including black cases
+const DEVICE_BRIGHT_THRESHOLD = 170;
+const DEVICE_MIN_AREA_RATIO = 0.12;
+const GAZE_UNCERTAIN_REQUIRED = 2; // respond faster on unclear but obvious off-screen cues
 let gazeUncertainConsecutive = 0;
 // Face-center tracking to detect looking at other screens/devices
 let faceCenterHistory = [];
 const FACE_HISTORY_LEN = 12;
-const FACE_AWAY_THRESHOLD = 0.16; // normalized (0..1) displacement from center (more sensitive)
-const FACE_AWAY_CONSECUTIVE_REQUIRED = 2; // fewer consecutive frames required
+const FACE_AWAY_THRESHOLD = 0.06; // make head shifts register much earlier than before
+const FACE_AWAY_CONSECUTIVE_REQUIRED = 1;
 let faceAwayConsecutive = 0;
 let calibrationPassed = false;
 let calibrationHistory = [];
+const PHONE_DETECT_INTERVAL_MS = 400;
+const PHONE_DETECT_CONFIDENCE = 0.35;
+const PHONE_MIN_AREA_RATIO = 0.0008;
+let phoneDetector = null;
+let phoneDetectionReady = false;
+let phoneDetectionLastRun = 0;
 let calibrationConsecutive = 0;
+let noFaceConsecutive = 0;
 let autoStartedOnCalibration = false;
 const CALIBRATION_HISTORY_LEN = 10;
 const CALIBRATION_REQUIRED = 3; // short hold once a face is detected
 const CALIBRATION_DECAY = 1; // only lose one step when face briefly lost
+const NO_FACE_CONSECUTIVE_REQUIRED = 2;
 const GAZE_SAMPLE_SIZE = 10;
 const GAZE_CONSECUTIVE_LIMIT = 4; // require more consecutive samples to trigger
 const GAZE_THRESHOLD_X = 0.55; // stronger threshold for looking away
@@ -127,7 +141,7 @@ window.addEventListener('storage', e => {
   if(e.key === STORAGE_KEY) handleRemoteDataUpdate();
 });
 window.addEventListener('lms-data-update', handleRemoteDataUpdate);
-function toast(msg, d=2200){
+function toast(msg, d=4200){
   const t = document.getElementById('toast');
   t.textContent = msg; t.classList.add('show');
   setTimeout(()=>t.classList.remove('show'), d);
@@ -337,45 +351,51 @@ function enterPortal(role){
 
   if(role === 'admin'){
     // Theme
-    document.documentElement.style.setProperty('--sidebar','#3f0f1f');
-    document.documentElement.style.setProperty('--sidebar-hover','#5a1a31');
-    document.documentElement.style.setProperty('--accent','#e11d48');
-    document.documentElement.style.setProperty('--accent2','#dc2626');
-    document.getElementById('topbar').style.background = '#3f0f1f';
+    document.documentElement.style.setProperty('--sidebar','#ffffff');
+    document.documentElement.style.setProperty('--sidebar-hover','#fff8e1');
+    document.documentElement.style.setProperty('--accent','#4169e1');
+    document.documentElement.style.setProperty('--accent2','#d4af37');
+    document.getElementById('topbar').style.background = '#1e3a8a';
+    const sidebar = document.getElementById('sidebar');
+    if(sidebar){ sidebar.style.background = '#ffffff'; sidebar.style.color = '#111827'; sidebar.style.boxShadow = 'inset -1px 0 0 rgba(15,23,42,.08)'; }
     document.getElementById('portal-label').textContent = 'Admin Portal';
-    document.getElementById('portal-label').style.color = '#fda4af';
+    document.getElementById('portal-label').style.color = '#eef4ff';
     document.getElementById('user-avatar').textContent = 'AD';
-    document.getElementById('user-avatar').style.background = '#e11d48';
+    document.getElementById('user-avatar').style.background = '#d4af37';
     document.getElementById('user-name').textContent = 'System Administrator';
     buildAdminUI();
     navAdmin('dashboard', null);
     initBackend('admin');
   } else if(role === 'teacher'){
     // Theme
-    document.documentElement.style.setProperty('--sidebar','#1a2744');
-    document.documentElement.style.setProperty('--sidebar-hover','#243460');
-    document.documentElement.style.setProperty('--accent','#2563eb');
-    document.documentElement.style.setProperty('--accent2','#16a34a');
-    document.getElementById('topbar').style.background = '#1a2744';
+    document.documentElement.style.setProperty('--sidebar','#ffffff');
+    document.documentElement.style.setProperty('--sidebar-hover','#fff8e1');
+    document.documentElement.style.setProperty('--accent','#4169e1');
+    document.documentElement.style.setProperty('--accent2','#d4af37');
+    document.getElementById('topbar').style.background = '#1e3a8a';
+    const sidebar = document.getElementById('sidebar');
+    if(sidebar){ sidebar.style.background = '#ffffff'; sidebar.style.color = '#111827'; sidebar.style.boxShadow = 'inset -1px 0 0 rgba(15,23,42,.08)'; }
     document.getElementById('portal-label').textContent = 'Teacher Portal';
-    document.getElementById('portal-label').style.color = '#93c5fd';
+    document.getElementById('portal-label').style.color = '#eef4ff';
     document.getElementById('user-avatar').textContent = 'TR';
-    document.getElementById('user-avatar').style.background = '#3b82f6';
+    document.getElementById('user-avatar').style.background = '#d4af37';
     document.getElementById('user-name').textContent = 'Prof. Teacher';
     buildTeacherUI();
     navTeacher('dashboard', null);
     initBackend('teacher');
   } else {
     // Theme
-    document.documentElement.style.setProperty('--sidebar','#0f4c35');
-    document.documentElement.style.setProperty('--sidebar-hover','#1a6b4a');
-    document.documentElement.style.setProperty('--accent','#16a34a');
-    document.documentElement.style.setProperty('--accent2','#16a34a');
-    document.getElementById('topbar').style.background = '#0f4c35';
+    document.documentElement.style.setProperty('--sidebar','#ffffff');
+    document.documentElement.style.setProperty('--sidebar-hover','#fff8e1');
+    document.documentElement.style.setProperty('--accent','#4169e1');
+    document.documentElement.style.setProperty('--accent2','#d4af37');
+    document.getElementById('topbar').style.background = '#1e3a8a';
+    const sidebar = document.getElementById('sidebar');
+    if(sidebar){ sidebar.style.background = '#ffffff'; sidebar.style.color = '#111827'; sidebar.style.boxShadow = 'inset -1px 0 0 rgba(15,23,42,.08)'; }
     document.getElementById('portal-label').textContent = 'Student Portal';
-    document.getElementById('portal-label').style.color = '#86efac';
+    document.getElementById('portal-label').style.color = '#eef4ff';
     document.getElementById('user-avatar').textContent = 'JD';
-    document.getElementById('user-avatar').style.background = '#16a34a';
+    document.getElementById('user-avatar').style.background = '#d4af37';
     document.getElementById('user-name').textContent = 'Juan Dela Cruz';
     buildStudentUI();
     navStudent('dashboard', null);
@@ -396,28 +416,28 @@ function switchPortal(){
 // ════════════════════════════════════════
 function buildTeacherUI(){
   document.getElementById('sidebar').innerHTML = `
-    <div class="section-label" style="color:#6b85b8">Main</div>
-    <a href="#" class="active" style="color:#c7d2e8" onclick="return navTeacher('dashboard',this)">
+    <div class="section-label" style="color:#374151">Main</div>
+    <a href="#" class="active" style="color:#111827" onclick="return navTeacher('dashboard',this)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>Dashboard</a>
-    <a href="#" style="color:#c7d2e8" onclick="return navTeacher('courses',this)">
+    <a href="#" style="color:#111827" onclick="return navTeacher('courses',this)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>My Courses</a>
-    <div class="section-label" style="color:#6b85b8">Assessments</div>
-    <a href="#" style="color:#c7d2e8" onclick="return navTeacher('exams',this)">
+    <div class="section-label" style="color:#374151">Assessments</div>
+    <a href="#" style="color:#111827" onclick="return navTeacher('exams',this)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>Exams &amp; Quizzes</a>
-    <a href="#" style="color:#c7d2e8" onclick="return navTeacher('sessions',this)">
+    <a href="#" style="color:#111827" onclick="return navTeacher('sessions',this)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h18"/><path d="M7 7v14"/><path d="M17 7v14"/><path d="M3 21h18"/></svg>Monitored Exams</a>
-    <a href="#" style="color:#c7d2e8" onclick="return navTeacher('results',this)">
+    <a href="#" style="color:#111827" onclick="return navTeacher('results',this)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>Student Results</a>
-    <div class="section-label" style="color:#6b85b8">Tools</div>
-    <a href="#" style="color:#c7d2e8" onclick="return navTeacher('grades',this)">
+    <div class="section-label" style="color:#374151">Tools</div>
+    <a href="#" style="color:#111827" onclick="return navTeacher('grades',this)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>Grade Book</a>
-    <a href="#" style="color:#c7d2e8" onclick="return navTeacher('students',this)">
+    <a href="#" style="color:#111827" onclick="return navTeacher('students',this)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>Students</a>
   `;
   // Apply active sidebar style
   document.querySelectorAll('#sidebar a').forEach(a=>{
-    a.addEventListener('mouseenter',()=>{ if(!a.classList.contains('active')) a.style.background='#243460'; });
-    a.addEventListener('mouseleave',()=>{ if(!a.classList.contains('active')) a.style.background=''; });
+    a.addEventListener('mouseenter',()=>{ if(!a.classList.contains('active')) a.style.background='rgba(212,175,55,0.14)'; a.style.color='#111827'; });
+    a.addEventListener('mouseleave',()=>{ if(!a.classList.contains('active')) a.style.background=''; a.style.color='#111827'; });
   });
 
   document.getElementById('main-content').innerHTML = `
@@ -508,7 +528,7 @@ function navTeacher(page, el){
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('#sidebar a').forEach(a=>{ a.classList.remove('active'); a.style.background=''; });
   document.getElementById('page-'+page).classList.add('active');
-  if(el){ el.classList.add('active'); el.style.background='#243460'; }
+  if(el){ el.classList.add('active'); el.style.background='linear-gradient(90deg, #d4af37 0%, #f1de9a 100%)'; el.style.color='#111827'; }
   if(page==='dashboard') renderTeacherDashboard();
   if(page==='courses') renderCourses();
   if(page==='exams') renderExams();
@@ -758,21 +778,26 @@ function renderGrades(){
 // ════════════════════════════════════════
 function buildStudentUI(){
   document.getElementById('sidebar').innerHTML = `
-    <div class="section-label" style="color:#6ba88a">Main</div>
-    <a href="#" class="active" style="color:#a7d9c0" onclick="return navStudent('dashboard',this)">
+    <div class="section-label" style="color:#374151">Main</div>
+    <a href="#" class="active" style="color:#111827" onclick="return navStudent('dashboard',this)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>Dashboard</a>
-    <a href="#" style="color:#a7d9c0" onclick="return navStudent('courses',this)">
+    <a href="#" style="color:#111827" onclick="return navStudent('courses',this)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>My Courses</a>
-    <div class="section-label" style="color:#6ba88a">Assessments</div>
+    <div class="section-label" style="color:#374151">Assessments</div>
     <!-- Enter Session removed: exams auto-join when opened -->
-    <a href="#" style="color:#a7d9c0" onclick="return navStudent('exams',this)">
+    <a href="#" style="color:#111827" onclick="return navStudent('exams',this)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>Available Exams</a>
-    <a href="#" style="color:#a7d9c0" onclick="return navStudent('results',this)">
+    <a href="#" style="color:#111827" onclick="return navStudent('results',this)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>My Results</a>
-    <div class="section-label" style="color:#6ba88a">More</div>
-    <a href="#" style="color:#a7d9c0" onclick="return navStudent('profile',this)">
+    <div class="section-label" style="color:#374151">More</div>
+    <a href="#" style="color:#111827" onclick="return navStudent('profile',this)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>My Profile</a>
   `;
+
+  document.querySelectorAll('#sidebar a').forEach(a=>{
+    a.addEventListener('mouseenter',()=>{ if(!a.classList.contains('active')) { a.style.background='linear-gradient(90deg, rgba(212,175,55,.18) 0%, rgba(212,175,55,.08) 100%)'; a.style.color='#111827'; } });
+    a.addEventListener('mouseleave',()=>{ if(!a.classList.contains('active')) { a.style.background=''; a.style.color='#111827'; } });
+  });
 
   document.getElementById('main-content').innerHTML = `
     <!-- STUDENT DASHBOARD -->
@@ -834,7 +859,7 @@ function navStudent(page, el){
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('#sidebar a').forEach(a=>{ a.classList.remove('active'); a.style.background=''; });
   document.getElementById('page-'+page).classList.add('active');
-  if(el){ el.classList.add('active'); el.style.background='#1a6b4a'; }
+  if(el){ el.classList.add('active'); el.style.background='linear-gradient(90deg, #d4af37 0%, #f1de9a 100%)'; el.style.color='#111827'; }
   if(page==='dashboard') renderStudentDashboard();
   if(page==='courses') renderStudentCourses();
   // session page removed; monitoring is automatic when a student opens an exam
@@ -986,26 +1011,26 @@ function renderStudentResults(){
 // ════════════════════════════════════════
 function buildAdminUI(){
   document.getElementById('sidebar').innerHTML = `
-    <div class="section-label" style="color:#f5a6bb">System</div>
-    <a href="#" class="active" style="color:#fbcfe8" onclick="return navAdmin('dashboard',this)">
+    <div class="section-label" style="color:#374151">System</div>
+    <a href="#" class="active" style="color:#111827" onclick="return navAdmin('dashboard',this)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>Dashboard</a>
-    <a href="#" style="color:#fbcfe8" onclick="return navAdmin('users',this)">
+    <a href="#" style="color:#111827" onclick="return navAdmin('users',this)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>User Management</a>
-    <a href="#" style="color:#fbcfe8" onclick="return navAdmin('courses',this)">
+    <a href="#" style="color:#111827" onclick="return navAdmin('courses',this)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>Courses</a>
-    <a href="#" style="color:#fbcfe8" onclick="return navAdmin('exams',this)">
+    <a href="#" style="color:#111827" onclick="return navAdmin('exams',this)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>All Assessments</a>
-    <div class="section-label" style="color:#f5a6bb">Monitoring</div>
-    <a href="#" style="color:#fbcfe8" onclick="return navAdmin('sessions',this)">
+    <div class="section-label" style="color:#374151">Monitoring</div>
+    <a href="#" style="color:#111827" onclick="return navAdmin('sessions',this)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h18"/><path d="M7 7v14"/><path d="M17 7v14"/><path d="M3 21h18"/></svg>Active Sessions</a>
-    <a href="#" style="color:#fbcfe8" onclick="return navAdmin('submissions',this)">
+    <a href="#" style="color:#111827" onclick="return navAdmin('submissions',this)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>Submissions</a>
-    <a href="#" style="color:#fbcfe8" onclick="return navAdmin('events',this)">
+    <a href="#" style="color:#111827" onclick="return navAdmin('events',this)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>Audit Log</a>
-    <div class="section-label" style="color:#f5a6bb">Settings</div>
-    <a href="#" style="color:#fbcfe8" onclick="return navAdmin('settings',this)">
+    <div class="section-label" style="color:#374151">Settings</div>
+    <a href="#" style="color:#111827" onclick="return navAdmin('settings',this)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v6m0 6v6M4.22 4.22l4.24 4.24m5.08 0l4.24-4.24M1 12h6m6 0h6M4.22 19.78l4.24-4.24m5.08 0l4.24 4.24"/></svg>System Settings</a>
-    <a href="#" style="color:#fbcfe8" onclick="return navAdmin('reports',this)">
+    <a href="#" style="color:#111827" onclick="return navAdmin('reports',this)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3h18v18H3z"/><path d="M9 9h6v6H9z"/><line x1="9" y1="5" x2="9" y2="3"/><line x1="15" y1="5" x2="15" y2="3"/></svg>Reports</a>
   `;
 
@@ -1095,9 +1120,6 @@ function buildAdminUI(){
             <label><input type="checkbox" id="a-setting-gaze" checked style="margin-right:.5rem"/>Gaze Tracking Enabled</label>
           </div>
           <div class="form-group">
-            <label><input type="checkbox" id="a-setting-audio" checked style="margin-right:.5rem"/>Audio Monitoring Enabled</label>
-          </div>
-          <div class="form-group">
             <label>Suspicion Score Threshold: <input type="number" id="a-setting-threshold" value="50" min="0" max="100" style="width:100px;margin-left:.5rem"/></label>
           </div>
           <button class="btn btn-primary" style="width:fit-content" onclick="saveAdminSettings()">Save Settings</button>
@@ -1130,8 +1152,8 @@ function buildAdminUI(){
   `;
 
   document.querySelectorAll('#sidebar a').forEach(a=>{
-    a.addEventListener('mouseenter',()=>{ if(!a.classList.contains('active')) a.style.background='#5a1a31'; });
-    a.addEventListener('mouseleave',()=>{ if(!a.classList.contains('active')) a.style.background=''; });
+    a.addEventListener('mouseenter',()=>{ if(!a.classList.contains('active')) { a.style.background='linear-gradient(90deg, rgba(212,175,55,.18) 0%, rgba(212,175,55,.08) 100%)'; a.style.color='#111827'; } });
+    a.addEventListener('mouseleave',()=>{ if(!a.classList.contains('active')) { a.style.background=''; a.style.color='#111827'; } });
   });
 }
 
@@ -1140,7 +1162,7 @@ function navAdmin(page, el){
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('#sidebar a').forEach(a=>{ a.classList.remove('active'); a.style.background=''; });
   document.getElementById('page-'+page).classList.add('active');
-  if(el){ el.classList.add('active'); el.style.background='#5a1a31'; }
+  if(el){ el.classList.add('active'); el.style.background='linear-gradient(90deg, #d4af37 0%, #f1de9a 100%)'; el.style.color='#111827'; }
   if(page==='dashboard') renderAdminDashboard();
   if(page==='users') renderAdminUsers();
   if(page==='courses') renderAdminCourses();
@@ -1331,7 +1353,6 @@ function saveAdminSettings(){
   const settings = {
     faceDetection: document.getElementById('a-setting-face').checked,
     gazeTracking: document.getElementById('a-setting-gaze').checked,
-    audioMonitoring: document.getElementById('a-setting-audio').checked,
     suspicionThreshold: parseInt(document.getElementById('a-setting-threshold').value)
   };
   localStorage.setItem('admin_settings', JSON.stringify(settings));
@@ -1587,11 +1608,12 @@ function finalizeProctoring(){
 function recordProctorEvent(type, details, weight){
   if(!proctorSession) return;
   const now = new Date();
+  const added = addProctorWeight(weight || 8, type);
+  if(added <= 0) return;
+
   const event = {time: now.toLocaleTimeString(), type, details, weight};
   proctorSession.events.push(event);
-  // apply weight with multiplier and per-type cooldown to reduce noisy scoring
-  const added = addProctorWeight(weight || 8, type);
-  if(added > 0 && !proctorSession.alerted && proctorSession.score >= 40){
+  if(!proctorSession.alerted && proctorSession.score >= 40){
     toast('ProctorVision flagged suspicious activity for teacher review.');
     proctorSession.alerted = true;
   }
@@ -1599,8 +1621,9 @@ function recordProctorEvent(type, details, weight){
   try{
     if(activeExam && activeExam.id){
       liveEventBuffer.push({ examId: activeExam.id, studentName: STUDENT_NAME, time: now.toISOString(), type, details, weight, added });
-      // schedule flush
+      // flush immediately so the live monitor updates without waiting for the old 2-second batch window
       if(liveEventFlushTimer) clearTimeout(liveEventFlushTimer);
+      flushLiveEvents();
       liveEventFlushTimer = setTimeout(flushLiveEvents, LIVE_EVENT_FLUSH_MS);
       backendPostEvent({ type, details, weight, time: now.toISOString() });
     }
@@ -1611,7 +1634,10 @@ function addProctorWeight(weight, type){
   if(!proctorSession) return 0;
   proctorSession.lastEventAtByType = proctorSession.lastEventAtByType || {};
   const nowMs = Date.now();
-  if(proctorSession.lastEventAtByType[type] && (nowMs - proctorSession.lastEventAtByType[type]) < EVENT_COOLDOWN_MS){
+  const cooldownMs = (type === 'restricted_object' || type === 'offscreen_device_look' || type === 'gaze_away' || type === 'head_tilt')
+    ? DEVICE_EVENT_COOLDOWN_MS
+    : EVENT_COOLDOWN_MS;
+  if(proctorSession.lastEventAtByType[type] && (nowMs - proctorSession.lastEventAtByType[type]) < cooldownMs){
     return 0; // ignore rapid repeats
   }
   proctorSession.lastEventAtByType[type] = nowMs;
@@ -1669,6 +1695,7 @@ function resetCameraExamState(){
   autoStartedOnCalibration = false;
   faceCenterHistory = [];
   faceAwayConsecutive = 0;
+  noFaceConsecutive = 0;
   gazeHistory = [];
   gazeAwayConsecutive = 0;
   gazeUncertainConsecutive = 0;
@@ -1719,72 +1746,47 @@ async function ensureCameraAccess(){
 
 async function openCameraStream(){
   if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error('Camera not supported');
-  let stream;
-  try{
-    stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:640,height:480},audio:true});
-  }catch(err){
-    console.warn('getUserMedia(video+audio) failed, trying video-only', err);
-    // try video-only fallback
-    try{
-      stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:640,height:480},audio:false});
-      // surface diagnostic about audio failure
-      const diag = document.getElementById('camera-diagnostics'); if(diag) diag.textContent = 'Could not start audio source';
-      updateCameraStatus('Camera active (no audio)','Microphone unavailable or permission denied');
-      audioAvailable = false;
-    }catch(err2){
-      console.error('getUserMedia(video-only) failed', err2);
-      throw err2;
-    }
-  }
+  const stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:1280},height:{ideal:720}}});
   cameraStream = stream;
   try{ listMediaDevices(); }catch(e){}
   const video = document.getElementById('camera-video');
   video.srcObject = stream;
   await video.play().catch(()=>{});
-  initializeFaceDetector();
-  try{ initializeAudioAnalysis(stream); }catch(e){
-    console.warn('initializeAudioAnalysis failed', e);
-    const diag = document.getElementById('camera-diagnostics'); if(diag) diag.textContent = 'Could not start audio source';
-    audioAvailable = false;
-  }
+  await initializeFaceDetector();
   startCameraAnalysis();
   disableCalibration();
   updateCameraStatus('Camera active','');
   hideCameraOverlay();
 }
 
-function initializeFaceDetector(){
-  if('FaceDetector' in window){
-    if(!faceDetector) faceDetector = new FaceDetector({fastMode:true,maxDetectedFaces:2});
-  } else {
-    faceDetector = null;
+async function initializeFaceDetector(){
+  faceDetector = null;
+  if(!window.tf || !window.faceDetection || !window.faceDetection.SupportedModels){
+    console.warn('[ProctorVision] AI face detector unavailable: TensorFlow.js face-detection model not loaded');
+    return;
   }
-}
 
-function initializeAudioAnalysis(stream){
-  if(!window.AudioContext && !window.webkitAudioContext) { audioAvailable = false; return; }
-  if(audioContext){
-    try{ audioContext.close(); }catch(e){}
-    audioContext = null;
-    analyserNode = null;
-    audioDataArray = null;
+  const detectorOptions = {
+    scoreThreshold: 0.18,
+    maxFaces: 2
+  };
+
+  const runtimes = ['mediapipe', 'tfjs'];
+  for (const runtime of runtimes) {
+    try {
+      faceDetector = await window.faceDetection.createDetector(
+        window.faceDetection.SupportedModels.MediaPipeFaceDetector,
+        { ...detectorOptions, runtime }
+      );
+      console.info(`[ProctorVision] AI face detector ready using ${runtime}`);
+      return;
+    } catch (err) {
+      console.warn(`[ProctorVision] AI face detector runtime ${runtime} failed`, err);
+      faceDetector = null;
+    }
   }
-  // if stream has no audio tracks, skip audio setup
-  if(!stream || !stream.getAudioTracks || stream.getAudioTracks().length === 0){ audioAvailable = false; return; }
-  const AudioCtx = window.AudioContext || window.webkitAudioContext;
-  try{
-    audioContext = new AudioCtx();
-    const source = audioContext.createMediaStreamSource(stream);
-    analyserNode = audioContext.createAnalyser();
-    analyserNode.fftSize = 512;
-    source.connect(analyserNode);
-    audioDataArray = new Uint8Array(analyserNode.frequencyBinCount);
-    audioAvailable = true;
-  }catch(e){
-    console.warn('audio init failed', e);
-    audioAvailable = false;
-    try{ if(audioContext){ audioContext.close(); audioContext = null; } }catch(e){}
-  }
+
+  console.warn('[ProctorVision] AI face detector failed to load with all supported runtimes');
 }
 
 function startCameraAnalysis(){
@@ -1803,25 +1805,33 @@ function startCameraAnalysis(){
 // which often corresponds to a face in webcam frames. Returns a bbox or null.
 function detectFaceFallback(frame, width, height){
   const data = frame.data;
-  const step = 4; // sample every 4th pixel for speed
+  const step = 4;
   let minX = width, minY = height, maxX = 0, maxY = 0, count = 0;
+
   for(let y=0;y<height;y+=step){
     for(let x=0;x<width;x+=step){
       const i = (y*width + x)*4;
       const r = data[i], g = data[i+1], b = data[i+2];
       const l = 0.2126*r + 0.7152*g + 0.0722*b;
-      // skin/face pixels usually fall in mid-range luminance for webcams
-      if(l > 30 && l < 220){
-        // additional simple heuristic: more likely near center horizontally
-        if(x > width*0.1 && x < width*0.9){
-          minX = Math.min(minX, x); maxX = Math.max(maxX, x);
-          minY = Math.min(minY, y); maxY = Math.max(maxY, y);
-          count++;
-        }
+      const max = Math.max(r, g, b);
+      const min = Math.min(r, g, b);
+      const saturation = max - min;
+
+      // Face-like pixels: reasonable brightness + modest saturation + centered region.
+      const isSkinTone = r > 70 && g > 35 && b > 20 && r > g && r > b && saturation > 10;
+      const isFaceLike = (l > 18 && l < 245 && saturation > 8) || isSkinTone;
+
+      if(isFaceLike && x > width*0.08 && x < width*0.92){
+        minX = Math.min(minX, x);
+        maxX = Math.max(maxX, x);
+        minY = Math.min(minY, y);
+        maxY = Math.max(maxY, y);
+        count++;
       }
     }
   }
-  if(count < 20) return null; // not enough pixels
+
+  if(count < 6) return null;
   // pad bbox a bit
   const padX = Math.max(8, Math.floor((maxX-minX)*0.12));
   const padY = Math.max(8, Math.floor((maxY-minY)*0.18));
@@ -1842,8 +1852,6 @@ function stopCameraAnalysis(){
 function closeCameraStream(){
   stopCameraAnalysis();
   if(cameraStream){ cameraStream.getTracks().forEach(track=>track.stop()); cameraStream = null; }
-  if(audioContext){ try{ audioContext.close(); }catch(e){} audioContext = null; analyserNode = null; audioDataArray = null; }
-  audioAvailable = false;
   const video = document.getElementById('camera-video');
   const canvas = document.getElementById('camera-canvas');
   if(video) video.srcObject = null;
@@ -1859,14 +1867,20 @@ async function analyzeCameraFrame(){
   const video = document.getElementById('camera-video');
   const canvas = document.getElementById('camera-canvas');
   if(!video || video.readyState < 2) return;
-  const width = 320, height = 240;
+  const width = 1280, height = 720;
   canvas.width = width; canvas.height = height;
-  const ctx = canvas.getContext('2d');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
   ctx.drawImage(video,0,0,width,height);
   const frame = ctx.getImageData(0,0,width,height);
   const brightness = calculateFrameBrightness(frame.data);
   const variance = calculateFrameVariance(frame.data, brightness);
   const cameraBlocked = brightness < 22 || variance < 280;
+  const qualityMsg = brightness < 40 || variance < 350
+    ? 'Low-light or noisy camera feed; face/phone detection may be unreliable.'
+    : 'Camera feed looks usable for detection.';
+  const diagEl = document.getElementById('camera-diagnostics');
+  if(diagEl){ diagEl.textContent = `Brightness ${brightness.toFixed(1)} • variance ${variance.toFixed(0)} • ${qualityMsg}`; }
+
   if(cameraBlocked){
     if(proctorSession) recordProctorEvent('camera_blocked','Camera appears covered or blocked',20);
     if(proctorSession) pauseExam('Camera blocked or covered');
@@ -1876,50 +1890,66 @@ async function analyzeCameraFrame(){
     resumeExam();
   }
   let scaledFaceBox = null;
+  let faceDetectionSource = 'none';
+  lastDetectedFaceBox = null;
   if(faceDetector){
     try{
-      const faces = await faceDetector.detect(video);
-      if(faces.length === 0){
-        if(proctorSession){
-          pauseReason = 'Face not detected';
-          recordProctorEvent('no_face','Unable to detect a face in camera view',18);
-          pauseExam(pauseReason);
-        } else {
-          updateCalibrationProgress(false);
-        }
-        return;
+      const faces = await faceDetector.estimateFaces(video, { flipHorizontal: true });
+      if(faces.length > 0){
+        noFaceConsecutive = 0;
+        faceDetectionSource = 'ai';
+        if(faces.length > 1){ recordProctorEvent('multiple_people','More than one person detected in the camera view',24); }
+        const face = faces[0];
+        const box = face.box || face.boundingBox || face;
+        const faceBox = {
+          x: box.xMin ?? box.x ?? 0,
+          y: box.yMin ?? box.y ?? 0,
+          width: box.width ?? (box.xMax - box.xMin) ?? 0,
+          height: box.height ?? (box.yMax - box.yMin) ?? 0
+        };
+        const scaleX = (video.videoWidth && video.videoWidth > 0) ? (width / video.videoWidth) : 1;
+        const scaleY = (video.videoHeight && video.videoHeight > 0) ? (height / video.videoHeight) : 1;
+        scaledFaceBox = {
+          x: Math.max(0, Math.floor(faceBox.x * scaleX)),
+          y: Math.max(0, Math.floor(faceBox.y * scaleY)),
+          width: Math.max(1, Math.floor(faceBox.width * scaleX)),
+          height: Math.max(1, Math.floor(faceBox.height * scaleY))
+        };
+      } else {
+        noFaceConsecutive = Math.min(NO_FACE_CONSECUTIVE_REQUIRED, noFaceConsecutive + 1);
       }
-      if(faces.length > 1){ recordProctorEvent('multiple_people','More than one person detected in the camera view',24); }
-      const faceBox = faces[0].boundingBox;
-      // scale detector bbox to our analysis canvas size (video may be different resolution)
-      const scaleX = (video.videoWidth && video.videoWidth > 0) ? (width / video.videoWidth) : 1;
-      const scaleY = (video.videoHeight && video.videoHeight > 0) ? (height / video.videoHeight) : 1;
-      scaledFaceBox = {
-        x: Math.max(0, Math.floor(faceBox.x * scaleX)),
-        y: Math.max(0, Math.floor(faceBox.y * scaleY)),
-        width: Math.max(1, Math.floor(faceBox.width * scaleX)),
-        height: Math.max(1, Math.floor(faceBox.height * scaleY))
-      };
     }catch(err){
-      console.warn('FaceDetector failed', err);
+      console.warn('AI face detection failed', err);
     }
   }
-  // fallback detection if FaceDetector not available or failed
+
   if(!scaledFaceBox){
-    const fb = detectFaceFallback(frame, width, height);
-    if(!fb){
-      if(proctorSession){
+    const fallbackBox = detectFaceFallback(frame, width, height);
+    if(fallbackBox){
+      scaledFaceBox = fallbackBox;
+      faceDetectionSource = 'fallback';
+      noFaceConsecutive = 0;
+    }
+  }
+
+  if(!scaledFaceBox){
+    const diagEl = document.getElementById('camera-diagnostics');
+    if(diagEl) diagEl.textContent = `No face detected. Brightness ${brightness.toFixed(1)} • variance ${variance.toFixed(0)}. Try moving closer to the camera and improving lighting.`;
+    if(proctorSession){
+      if(noFaceConsecutive >= NO_FACE_CONSECUTIVE_REQUIRED){
         pauseReason = 'Face not detected';
-        recordProctorEvent('no_face','Unable to detect a face in camera view (fallback)',18);
+        recordProctorEvent('no_face','Unable to detect a face in camera view',18);
         pauseExam(pauseReason);
-      } else {
-        updateCalibrationProgress(false);
       }
       return;
     }
-    scaledFaceBox = fb;
+    updateCalibrationProgress(false);
+    return;
   }
+
+  lastDetectedFaceBox = scaledFaceBox;
   if(!proctorSession) updateCalibrationProgress(true);
+  if(diagEl) diagEl.textContent = `Face source: ${faceDetectionSource} • face area ${(scaledFaceBox.width * scaledFaceBox.height / (width * height) * 100).toFixed(1)}% of frame • brightness ${brightness.toFixed(1)} • variance ${variance.toFixed(0)}`;
   analyzeFacePosition(scaledFaceBox, width, height);
   // Track face center to detect sustained head turns / looking at other screens
   try{
@@ -1938,10 +1968,7 @@ async function analyzeCameraFrame(){
       faceAwayConsecutive = 0;
     }
     if(faceAwayConsecutive >= FACE_AWAY_CONSECUTIVE_REQUIRED){
-      const predominant = avgDx > avgDy ? 'horizontal' : 'vertical';
-      const evType = predominant === 'horizontal' ? 'multi_screen_look' : 'face_turned_away';
-      recordProctorEvent(evType, `Face center shifted (${(avgDx*100).toFixed(1)}%, ${(avgDy*100).toFixed(1)}%)`, 10);
-      recordProctorEvent('offscreen_device_look', 'Student is looking toward a device or another display outside the camera field', 16);
+      // Keep this path non-eventful for now; the heuristic is not accurate enough.
       faceAwayConsecutive = 0;
       faceCenterHistory = [];
     }
@@ -1969,34 +1996,32 @@ async function analyzeCameraFrame(){
             } else {
               // Low-confidence frames may occur with glasses or poor cameras; use face-center fallback
               if(gaze.confidence < 0.45){
-                gazeUncertainConsecutive++;
-                const faceCenterX = scaledFaceBox.x + scaledFaceBox.width/2;
-                const faceCenterY = scaledFaceBox.y + scaledFaceBox.height/2;
-                const dxNorm = Math.abs(faceCenterX - width/2) / (width/2);
-                const dyNorm = Math.abs(faceCenterY - height/2) / (height/2);
-                if((dxNorm > 0.22 || dyNorm > 0.22) && gazeUncertainConsecutive >= GAZE_UNCERTAIN_REQUIRED){
-                  recordProctorEvent('gaze_away_fallback','Student appears to be looking away (low-confidence fallback)',10);
-                  recordProctorEvent('offscreen_device_look', 'Student appears to be focusing on a phone or other device outside the camera view', 16);
-                  gazeHistory = [];
-                  gazeUncertainConsecutive = 0;
-                  gazeAwayConsecutive = 0;
-                }
+                gazeUncertainConsecutive = 0;
               } else {
                 gazeAwayConsecutive = 0; gazeUncertainConsecutive = 0;
               }
             }
 
             if(gazeAwayConsecutive >= gazeAwayConsecutiveRequired){
-              recordProctorEvent('gaze_away','Student appears to be looking away from the screen repeatedly',14);
-              recordProctorEvent('offscreen_device_look', 'Student appears to be looking at something outside the camera view', 16);
               gazeHistory = [];
               gazeAwayConsecutive = 0;
             }
           }
         }
         }catch(e){ /* ignore gaze estimation errors */ }
-      analyzeAudio();
-  detectRestrictedItems(frame.data,width,height);
+  try{
+    if(proctorSession){
+      const phoneDetected = await detectPhoneWithAI(video, canvas);
+      if(!phoneDetected){
+        const heuristicPhone = detectRestrictedItems(frame.data, width, height, scaledFaceBox);
+        if(heuristicPhone){
+          recordProctorEvent('restricted_object','Possible phone or handheld device detected in lower camera area',14);
+        }
+      }
+    }
+  }catch(err){
+    console.warn('[ProctorVision] AI detection step failed', err);
+  }
 }
 
 function calculateFrameBrightness(data){
@@ -2020,32 +2045,19 @@ function analyzeFacePosition(face,width,height){
   const ratio = face.width/face.height;
   const faceAreaRatio = (face.width * face.height) / (width * height);
 
-  const isShifted = dx > width*0.22 || dy > height*0.22;
-  const isHeadTurned = ratio < 0.68 || ratio > 1.45;
-  const isSideTurned = ratio < 0.62 && faceAreaRatio < 0.095;
+  const shiftX = lastFaceCenterX !== null ? Math.abs(centerX - lastFaceCenterX) / Math.max(1, width) : 0;
+  const shiftY = lastFaceCenterY !== null ? Math.abs(centerY - lastFaceCenterY) / Math.max(1, height) : 0;
+  const isShifted = dx > width*0.10 || dy > height*0.10 || shiftX > 0.08 || shiftY > 0.08;
+  const isHeadTurned = ratio < 0.70 || ratio > 1.35;
+  const isSideTurned = ratio < 0.60 && faceAreaRatio < 0.12;
 
-  if(isShifted){
-    recordProctorEvent('gaze_away','Student appears to be looking away from the screen',14);
-  }
-
-  if(isHeadTurned || isSideTurned){
-    recordProctorEvent('head_tilt','Student head appears tilted or turned away',12);
-  }
-
-  // Capture lower-magnitude head turns that still indicate attention leaving the camera view
-  if(isShifted && (ratio < 0.72 || ratio > 1.40 || faceAreaRatio < 0.115)){
-    recordProctorEvent('offscreen_device_look','Student appears to be looking toward a device or display outside the camera view',16);
-  }
+  // Head-turn heuristics are intentionally kept non-eventful because the current
+  // browser-side detector is too noisy for this classroom use case.
 
   lastFaceAspect = ratio;
   lastFaceAreaRatio = faceAreaRatio;
-}
-
-function analyzeAudio(){
-  if(!analyserNode || !audioDataArray) return;
-  analyserNode.getByteFrequencyData(audioDataArray);
-  const rms = Math.sqrt(audioDataArray.reduce((sum,v)=>sum+v*v,0)/audioDataArray.length) / 255;
-  if(rms > 0.22){ recordProctorEvent('speech_detected','Audio detected during the exam; possible whispering or verbal communication',18); }
+  lastFaceCenterX = centerX;
+  lastFaceCenterY = centerY;
 }
 
 function analyzeFrameMotion(data, width, height, faceBox){
@@ -2101,39 +2113,173 @@ function analyzeFrameMotion(data, width, height, faceBox){
   return motionLevel;
 }
 
-function detectRestrictedItems(data,width,height){
-  const lowerY = Math.floor(height * 0.55);
-  let brightCount = 0, darkCount = 0, blockMatches = 0;
-  const area = (data.length - lowerY * width * 4) / 4;
-  const blockSize = 16;
+async function ensurePhoneDetector(){
+  if(phoneDetector) return phoneDetector;
+  if(!window.cocoSsd || !window.tf){
+    console.warn('[ProctorVision] AI phone detector unavailable: TensorFlow.js not loaded');
+    return null;
+  }
+  try{
+    phoneDetector = await window.cocoSsd.load({ base: 'mobilenet_v2' });
+    phoneDetectionReady = true;
+    console.info('[ProctorVision] AI phone detector ready');
+    return phoneDetector;
+  }catch(err){
+    console.warn('[ProctorVision] AI phone detector failed to load', err);
+    phoneDetector = null;
+    return null;
+  }
+}
+
+async function detectPhoneWithAI(video, canvas){
+  const now = Date.now();
+  if(now - phoneDetectionLastRun < PHONE_DETECT_INTERVAL_MS) return false;
+  phoneDetectionLastRun = now;
+
+  const model = await ensurePhoneDetector();
+  if(!model) return false;
+
+  try{
+    const detectionCanvas = document.createElement('canvas');
+    const sourceWidth = video.videoWidth && video.videoWidth > 0 ? video.videoWidth : canvas.width;
+    const sourceHeight = video.videoHeight && video.videoHeight > 0 ? video.videoHeight : canvas.height;
+    detectionCanvas.width = sourceWidth;
+    detectionCanvas.height = sourceHeight;
+    const ctx = detectionCanvas.getContext('2d');
+    ctx.drawImage(video, 0, 0, sourceWidth, sourceHeight);
+
+    const predictions = await model.detect(detectionCanvas);
+    const phonePrediction = predictions
+      .filter(p => {
+        const className = (p.className || '').toLowerCase();
+        return className.includes('phone') || className.includes('cell phone') || className.includes('smartphone');
+      })
+      .sort((a, b) => (b.score || 0) - (a.score || 0))[0];
+
+    if(phonePrediction && (phonePrediction.score || 0) >= PHONE_DETECT_CONFIDENCE){
+      const confidence = Math.max(0, Math.min(1, phonePrediction.score || 0));
+      const [x, y, width, height] = phonePrediction.bbox || [0, 0, 0, 0];
+      const area = width * height;
+      const frameArea = sourceWidth * sourceHeight;
+      const isLargeEnough = area / Math.max(1, frameArea) >= PHONE_MIN_AREA_RATIO;
+      if(!isLargeEnough) return false;
+
+      const detail = `AI phone detection confidence ${(confidence * 100).toFixed(1)}%`;
+      if(proctorSession){
+        recordProctorEvent('restricted_object', detail, 18);
+      }
+      const diag = document.getElementById('camera-diagnostics');
+      if(diag){ diag.textContent = detail; }
+      return true;
+    }
+    return false;
+  }catch(err){
+    console.warn('[ProctorVision] AI phone detection error', err);
+    return false;
+  }
+}
+
+function detectRestrictedItems(data,width,height,faceBox = lastDetectedFaceBox){
+  // The AI phone detector is the primary phone signal. The heuristic below is kept only
+  // as a non-event diagnostic path to avoid false restricted-object alerts.
+  const frameMean = calculateFrameBrightness(data);
+  const frameVariance = calculateFrameVariance(data, frameMean);
+  const poorCameraFrame = frameVariance < 35 || frameMean < 18 || frameMean > 230;
+
+  // Focus on the lower part of the frame so face/glasses motion does not trigger
+  // restricted-object alerts while still catching real handheld devices.
+  const lowerY = Math.floor(height * 0.58);
+  const faceBandTop = Math.floor(height * 0.02);
+  const faceBandBottom = Math.floor(height * 0.70);
+  const faceBandLeft = Math.floor(width * 0.16);
+  const faceBandRight = Math.floor(width * 0.84);
+  const faceCenter = faceBox ? { x: faceBox.x + faceBox.width / 2, y: faceBox.y + faceBox.height / 2 } : null;
+  let brightCount = 0, darkCount = 0, strongContrastCount = 0, candidateBlocks = 0;
+  const area = (height - lowerY) * width;
+  const blockSize = 18;
 
   for(let by = lowerY; by < height; by += blockSize){
     for(let bx = 0; bx < width; bx += blockSize){
-      let sum = 0, sumSq = 0, count = 0;
+      const blockCenterX = bx + blockSize / 2;
+      const blockCenterY = by + blockSize / 2;
+      const nearStudent = faceCenter
+        ? (Math.abs(blockCenterX - faceCenter.x) < faceBox.width * 1.8 && Math.abs(blockCenterY - faceCenter.y) < faceBox.height * 2.2)
+        : false;
+      const centerAligned = faceCenter ? Math.abs(blockCenterX - width / 2) < width * 0.42 : true;
+      const lowerDeviceBand = blockCenterY > height * 0.58;
+      const shouldInspect = nearStudent || (lowerDeviceBand && centerAligned);
+      if(!shouldInspect) continue;
+
+      let sum = 0, sumSq = 0, sumR = 0, sumG = 0, sumB = 0, count = 0;
+      let facePixels = 0;
+      let blockStrongContrastCount = 0;
       for(let y = by; y < Math.min(height, by + blockSize); y++){
         for(let x = bx; x < Math.min(width, bx + blockSize); x++){
           const i = (y * width + x) * 4;
-          const l = 0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2];
+          const isFaceRegion = y >= faceBandTop && y <= faceBandBottom && x >= faceBandLeft && x <= faceBandRight;
+          if(isFaceRegion) facePixels++;
+          const r = data[i];
+          const g = data[i + 1];
+          const b = data[i + 2];
+          const l = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+          const max = Math.max(r, g, b);
+          const min = Math.min(r, g, b);
           sum += l;
           sumSq += l * l;
+          sumR += r;
+          sumG += g;
+          sumB += b;
           count++;
+          if(max - min > 25) blockStrongContrastCount++;
         }
       }
       if(count === 0) continue;
       const avg = sum / count;
       const variance = (sumSq / count) - (avg * avg);
-      if(avg > 210) brightCount += count;
-      else if(avg < 45) darkCount += count;
-      if(variance > 900 && (avg > 210 || avg < 45)){
-        blockMatches++;
+      const saturation = Math.max(sumR / count, sumG / count, sumB / count) - Math.min(sumR / count, sumG / count, sumB / count);
+      const faceFraction = facePixels / count;
+      const isFaceLikeBlock = faceFraction >= 0.85;
+
+      // Dark objects, including black phone cases, should still count as candidates.
+      // On poor cameras, raise the bar further so ambient noise and glasses reflections
+      // are not mistaken for restricted items.
+      const minVariance = poorCameraFrame ? 400 : 320;
+      const minBrightVariance = poorCameraFrame ? 500 : 420;
+      const minContrastVariance = poorCameraFrame ? 520 : 420;
+      const minSaturation = poorCameraFrame ? 75 : 65;
+      const darkCandidate = avg < DEVICE_DARK_THRESHOLD && variance > minVariance && !isFaceLikeBlock;
+      const brightCandidate = avg > DEVICE_BRIGHT_THRESHOLD && variance > minBrightVariance && !isFaceLikeBlock;
+      const contrastCandidate = saturation > minSaturation && variance > minContrastVariance && !isFaceLikeBlock;
+
+      if(!isFaceLikeBlock) strongContrastCount += blockStrongContrastCount;
+
+      if(avg > DEVICE_BRIGHT_THRESHOLD) brightCount += count;
+      else if(avg < DEVICE_DARK_THRESHOLD) darkCount += count;
+
+      if(darkCandidate || brightCandidate || contrastCandidate){
+        candidateBlocks++;
       }
     }
   }
 
-  const isLargeRestrictedPatch = area > 0 && (blockMatches >= 8 || brightCount / area > 0.38 || darkCount / area > 0.38);
+  const darkRatio = darkCount / Math.max(1, area);
+  const brightRatio = brightCount / Math.max(1, area);
+  const candidateRatio = candidateBlocks / Math.max(1, (height - lowerY) / blockSize * (width / blockSize));
+  const minCandidateBlocks = poorCameraFrame ? 12 : 10;
+  const darkRatioThreshold = poorCameraFrame ? 0.55 : 0.45;
+  const brightRatioThreshold = poorCameraFrame ? 0.55 : 0.45;
+  const contrastRatioThreshold = poorCameraFrame ? 0.40 : 0.30;
+  const isLargeRestrictedPatch = area > 0 && (
+    candidateBlocks >= minCandidateBlocks ||
+    darkRatio > darkRatioThreshold ||
+    brightRatio > brightRatioThreshold ||
+    strongContrastCount / Math.max(1, area) > contrastRatioThreshold
+  );
+
   if(isLargeRestrictedPatch){
-    recordProctorEvent('restricted_object','Potential restricted item detected in the camera view',16);
+    return true;
   }
+  return false;
 }
 
 // Enumerate media devices and surface diagnostics to the overlay
@@ -2232,15 +2378,7 @@ function updateGazeHistory(gx, gy){
 
 function checkGazeBehavior(){
   if(gazeHistory.length < GAZE_CONSECUTIVE_LIMIT) return;
-  // check last N samples
-  const recent = gazeHistory.slice(-GAZE_CONSECUTIVE_LIMIT);
-  let awayCount = 0;
-  for(const s of recent){ if(Math.abs(s.gx) > GAZE_THRESHOLD_X) awayCount++; }
-  if(awayCount >= GAZE_CONSECUTIVE_LIMIT){
-    recordProctorEvent('gaze_away','Student appears to be looking away from the screen repeatedly',14);
-    // avoid repeated rapid events: clear gazeHistory
-    gazeHistory = [];
-  }
+  gazeHistory = [];
 }
 
 function pauseExam(reason){
@@ -2516,7 +2654,7 @@ function openExamMonitor(examId){
   fetchBackendExamEvents().then(render);
   document.getElementById('proctor-modal').classList.add('show');
   if(monitorInterval) clearInterval(monitorInterval);
-  monitorInterval = setInterval(()=>{ fetchBackendExamEvents().then(render); }, 1500);
+  monitorInterval = setInterval(()=>{ fetchBackendExamEvents().then(render); }, 500);
 }
 
 async function teacherFlag(examId, studentName){

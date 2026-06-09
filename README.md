@@ -1,4 +1,4 @@
-# ProctorVision + NeoGuard Demo
+# ProctorVision
 
 ## Quick start
 
@@ -31,7 +31,7 @@ Or use `.\start-backend.ps1` from the project root.
 |-------|------|
 | Frontend | HTML, CSS, JS (camera, face/gaze heuristics) |
 | Backend | Flask |
-| Database | SQLite (`backend/neoguard.db`) |
+| Database | SQLite (`backend/proctorvision.db`) |
 | Real-time | Socket.IO |
 | AI verdict | Gemini API (`backend/.env`) |
 | PDF reports | ReportLab |
