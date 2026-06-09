@@ -29,12 +29,12 @@ Or use `.\start-backend.ps1` from the project root.
 
 | Layer | Tech |
 |-------|------|
-| Frontend | HTML, CSS, JS (camera, face/gaze heuristics) |
-| Backend | Flask |
-| Database | SQLite (`backend/proctorvision.db`) |
-| Real-time | Socket.IO |
-| AI verdict | Gemini API (`backend/.env`) |
-| PDF reports | ReportLab |
+| Frontend | HTML, CSS, JavaScript, role-based portal UI |
+| Backend | Flask + Python services |
+| Database | SQLite (backend data store) |
+| Real-time | Socket.IO for live monitoring and event updates |
+| AI verdict | Gemini API via `backend/.env` |
+| Reports | ReportLab PDF export |
 
 ## Optional: Gemini AI verdicts
 
@@ -42,12 +42,12 @@ Copy `backend/.env.example` to `backend/.env` and set `GEMINI_API_KEY`. Without 
 
 ## Anti-cheating features
 
-- Webcam face detection + calibration
+- Webcam-based monitoring and face detection heuristics
+- Exam session monitoring with live activity events
+- Suspicion scoring and risk-based review
 - Tab switch / focus loss detection
 - Copy, cut, paste, and right-click blocking
 - DevTools / print / view-source shortcut blocking
 - Gaze-away and head-tilt heuristics
-- Audio (speech) detection
-- Dynamic suspicion scoring (frontend + backend)
-- Live teacher dashboard via Socket.IO
-- AI narrative verdict + PDF incident report
+- Live teacher dashboard and student result review
+- AI-assisted verdicts and PDF report generation
