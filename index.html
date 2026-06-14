@@ -3,9 +3,12 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
+<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0"/>
+<meta http-equiv="Pragma" content="no-cache"/>
+<meta http-equiv="Expires" content="0"/>
 <title>ProctorVision</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Serif+Display&display=swap" rel="stylesheet"/>
-<link rel="stylesheet" href="styles.css"/>
+<link rel="stylesheet" href="styles.css?v=20260614"/>
 
 </head>
 <body>
@@ -145,10 +148,12 @@
         <div class="progress-bar"><div class="progress-fill" id="q-prog-fill" style="width:0%"></div></div>
       </div>
       <div id="question-area"></div>
+      <div class="question-actions" id="question-actions">
+        <button class="btn btn-ghost" id="btn-prev-inline" onclick="prevQ()">Previous</button>
+        <button class="btn btn-primary" id="btn-next-inline" onclick="nextQ()">Next</button>
+      </div>
     </div>
     <div class="exam-footer">
-      <button class="btn btn-ghost" id="btn-prev" onclick="prevQ()">Previous</button>
-      <button class="btn btn-ghost" id="btn-next" onclick="nextQ()">Next</button>
       <button class="btn btn-primary" id="btn-submit" onclick="submitExam()" style="display:none">Submit Exam</button>
     </div>
   </div>
@@ -255,7 +260,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/face-detection@1.0.2/dist/face-detection.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/dist/coco-ssd.min.js"></script>
 <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
-<script src="app.js"></script>
+<script src="app.js?v=20260614"></script>
 
 </body>
 </html>

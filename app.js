@@ -84,10 +84,61 @@ let editingExamId = null, qCount = 0;
 // Disable answering when camera/exam is paused
 let examInputsDisabled = false;
 
+function normalizeQuestion(q, index){
+  if(typeof q === 'string') return { text: q, qtype: 'short', points: 1, choices: [], correct: undefined, _index: index };
+  const qtype = q?.qtype || 'short';
+  return {
+    text: q?.text || `Question ${index + 1}`,
+    qtype,
+    points: Number(q?.points) || 1,
+    choices: Array.isArray(q?.choices) && q.choices.length ? q.choices : (qtype === 'tf' ? ['true','false'] : []),
+    correct: q?.correct,
+    _index: index,
+  };
+}
+
+function shuffleArray(items){
+  const copy = [...items];
+  for(let i = copy.length - 1; i > 0; i--){
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
+
+function randomizeExamQuestions(exam){
+  const normalized = (exam?.questions || []).map((q, i) => normalizeQuestion(q, i));
+  if(!normalized.length) return [];
+
+  const questionOrder = shuffleArray(normalized.map((_, i) => i));
+
+  return questionOrder.map(originIndex => {
+    const question = normalized[originIndex];
+    const randomized = { ...question, originalIndex: originIndex };
+
+    if(question.qtype === 'mcq' && Array.isArray(question.choices) && question.choices.length > 1){
+      const choiceOrder = shuffleArray(question.choices.map((_, i) => i));
+      randomized.choices = choiceOrder.map(choiceIndex => question.choices[choiceIndex]);
+      const correctIndex = Number(question.correct);
+      if(Number.isInteger(correctIndex) && correctIndex >= 0 && correctIndex < question.choices.length){
+        randomized.correct = choiceOrder.indexOf(correctIndex);
+      }
+    }
+
+    if(question.qtype === 'tf'){
+      const tfChoices = ['true', 'false'];
+      const tfOrder = shuffleArray(tfChoices);
+      randomized.choices = tfOrder;
+    }
+
+    return randomized;
+  });
+}
+
 function setExamInputsDisabled(disabled){
   examInputsDisabled = !!disabled;
   try{
-    ['btn-prev','btn-next','btn-submit'].forEach(id=>{ const b=document.getElementById(id); if(b) { b.disabled = disabled; b.style.opacity = disabled ? '0.6' : ''; } });
+    ['btn-prev','btn-next','btn-submit','btn-prev-inline','btn-next-inline'].forEach(id=>{ const b=document.getElementById(id); if(b) { b.disabled = disabled; b.style.opacity = disabled ? '0.6' : ''; } });
     document.querySelectorAll('#question-area textarea, #question-area input, #question-area select').forEach(el=>{ el.disabled = disabled; });
     // ensure overlay is visible when disabled
     const overlay = document.getElementById('camera-overlay');
@@ -621,7 +672,8 @@ function openExamModal(){
   document.getElementById('exam-modal-title').textContent = 'Create Assessment';
   ['exam-title','exam-time','exam-instructions'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('exam-type').value = 'exam';
-  document.getElementById('questions-container').innerHTML = '';
+  const qc = document.getElementById('questions-container');
+  if(qc){ qc.innerHTML=''; qc.style.display='block'; qc.style.visibility='visible'; }
   qCount = 0;
   const sel = document.getElementById('exam-course');
   sel.innerHTML = '<option value="">Select course...</option>'+data.courses.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
@@ -640,7 +692,9 @@ function editExam(id){
   const sel = document.getElementById('exam-course');
   sel.innerHTML = '<option value="">Select course...</option>'+data.courses.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
   sel.value = exam.course||'';
-  const qc = document.getElementById('questions-container'); qc.innerHTML=''; qCount=0;
+  const qc = document.getElementById('questions-container');
+  if(qc){ qc.innerHTML=''; qc.style.display='block'; qc.style.visibility='visible'; }
+  qCount = 0;
   exam.questions.forEach(q=>addQuestion(q));
   document.getElementById('exam-modal').classList.add('show');
 }
@@ -648,12 +702,16 @@ function editExam(id){
 function closeExamModal(){ document.getElementById('exam-modal').classList.remove('show'); editingExamId=null; }
 
 function addQuestion(existing){
+  const qc = document.getElementById('questions-container');
+  if(!qc){ return; }
   qCount++;
   const qi = qCount;
-  const qc = document.getElementById('questions-container');
-  const div = document.createElement('div'); div.className='q-card'; div.id='q-'+qi;
+  const div = document.createElement('div');
+  div.className='q-card';
+  div.id='q-'+qi;
+  div.dataset.questionIndex = String(qi);
   div.innerHTML = `
-    <div class="q-hdr"><span class="q-num">Question ${qi}</span><button class="btn btn-ghost btn-sm" onclick="removeQ(${qi})">Remove</button></div>
+    <div class="q-hdr"><span class="q-num">Question ${qi}</span><button class="btn btn-ghost btn-sm" type="button" onclick="removeQ(${qi})">Remove</button></div>
     <div class="form-group"><label>Question Text</label><input type="text" id="qt-${qi}" placeholder="Enter question..." value="${existing?escHtml(existing.text):''}"/></div>
     <div class="form-group"><label>Type</label>
       <select id="qtype-${qi}" onchange="renderChoices(${qi})">
@@ -667,6 +725,11 @@ function addQuestion(existing){
   `;
   qc.appendChild(div);
   renderChoices(qi, existing);
+  qc.style.display='block';
+  qc.style.visibility='visible';
+  requestAnimationFrame(() => {
+    div.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  });
 }
 
 function renderChoices(qi, existing){
@@ -685,7 +748,40 @@ function renderChoices(qi, existing){
   }
 }
 
-function removeQ(qi){ const el=document.getElementById('q-'+qi); if(el) el.remove(); }
+function removeQ(qi){
+  const el=document.getElementById('q-'+qi);
+  if(!el) return;
+  el.remove();
+  renumberQuestionCards();
+}
+
+function renumberQuestionCards(){
+  const cards = Array.from(document.querySelectorAll('.q-card'));
+  cards.forEach((card, index) => {
+    const newQi = index + 1;
+    card.id = 'q-' + newQi;
+    card.dataset.questionIndex = String(newQi);
+    const num = card.querySelector('.q-num');
+    if(num) num.textContent = 'Question ' + newQi;
+    const removeBtn = card.querySelector('button');
+    if(removeBtn) removeBtn.setAttribute('onclick', 'removeQ(' + newQi + ')');
+    const qt = card.querySelector('input[id^="qt-"]');
+    if(qt) qt.id = 'qt-' + newQi;
+    const qtype = card.querySelector('select[id^="qtype-"]');
+    if(qtype){
+      qtype.id = 'qtype-' + newQi;
+      qtype.setAttribute('onchange', 'renderChoices(' + newQi + ')');
+    }
+    const points = card.querySelector('input[id^="qpts-"]');
+    if(points) points.id = 'qpts-' + newQi;
+    const choices = card.querySelector('[id^="choices-"]');
+    if(choices) choices.id = 'choices-' + newQi;
+    card.querySelectorAll('input[name^="correct-"]').forEach(input => {
+      input.name = 'correct-' + newQi;
+    });
+  });
+  qCount = cards.length;
+}
 
 function saveExam(status){
   const title = document.getElementById('exam-title').value.trim();
@@ -1414,11 +1510,15 @@ async function openExamIntro(examId){
   data = loadData();
   const exam = data.exams.find(e=>e.id===examId);
   if(!exam){ toast('Exam not found.'); return; }
+  activeExam = {
+    ...exam,
+    questions: randomizeExamQuestions(exam),
+  };
+  answers = {};
+  currentQ = 0;
   resetCameraExamState();
   closeCameraStream();
   backendJoinSession(exam);
-  let camOk = false;
-  try{ camOk = await ensureCameraAccess(); }catch(e){ camOk = false; }
   // Auto-join the student to this exam for monitoring (no manual sessions required)
   data.studentJoins = data.studentJoins || [];
   const existing = data.studentJoins.find(j=>j.studentName===STUDENT_NAME && j.examId===examId && j.status==='joined');
@@ -1429,31 +1529,42 @@ async function openExamIntro(examId){
     saveData();
   }
   if(hasSubmitted(examId)){ toast('Already submitted!'); return; }
-  activeExam=exam; answers={}; currentQ=0;
+  activeExam = {
+    ...exam,
+    questions: randomizeExamQuestions(exam),
+  };
+  answers = {};
+  currentQ = 0;
   const course = data.courses.find(c=>c.id===exam.course);
   document.getElementById('es-title').textContent = exam.title;
   document.getElementById('intro-title').textContent = exam.title;
   document.getElementById('intro-instructions').textContent = exam.instructions||'Answer all questions to the best of your ability.';
   document.getElementById('intro-qcount').textContent = exam.questions.length;
-  document.getElementById('intro-time').textContent = exam.timeLimit?exam.timeLimit+' minutes':'No time limit';
+  document.getElementById('intro-time').textContent = activeExam.timeLimit?activeExam.timeLimit+' minutes':'No time limit';
   document.getElementById('intro-course').textContent = course?course.name:'Unknown';
   document.getElementById('intro-screen').style.display='block';
   document.getElementById('questions-screen').style.display='none';
   document.getElementById('result-screen-wrap').style.display='none';
   document.getElementById('exam-shell').classList.add('show');
+  try{
+    await ensureCameraAccess();
+  }catch(e){
+    // Camera access is optional for the question rendering path; keep the exam usable.
+  }
   disableCalibration();
   updateStartButtonState();
 }
 
 async function beginExam(){
-  if(!calibrationPassed && !proctorSession){ toast('Please wait while your face is detected.'); return; }
-  if(!await ensureCameraAccess()) return;
+  if(!activeExam){ toast('Exam is still loading. Please try again.'); return; }
+  const cameraReady = await ensureCameraAccess().catch(()=>false);
+  if(!cameraReady){ toast('Camera access could not be confirmed, but you can continue the exam.'); }
   document.getElementById('intro-screen').style.display='none';
   document.getElementById('questions-screen').style.display='flex';
   document.getElementById('qs-exam-title').textContent=activeExam.title;
   document.getElementById('exam-shell').classList.add('proctoring-active');
   if(timerInterval) clearInterval(timerInterval);
-  startProctoring();
+  if(cameraReady){ startProctoring(); }
   timeLeft = activeExam.timeLimit?parseInt(activeExam.timeLimit)*60:0;
   if(timeLeft>0){
     updateTimerDisplay();
@@ -1470,34 +1581,77 @@ function updateTimerDisplay(){
 }
 
 function renderQuestion(idx){
-  const qs = activeExam.questions;
-  currentQ = idx;
-  document.getElementById('q-progress').textContent=(idx+1)+'/'+qs.length;
+  const qs = (activeExam?.questions || []).map((q, i) => normalizeQuestion(q, i));
+  if(!qs.length){
+    const area = document.getElementById('question-area');
+    if(area) area.innerHTML = '<div class="empty-state"><div class="icon">Info</div><p>No questions available for this exam.</p></div>';
+    return;
+  }
+  currentQ = Math.min(idx, qs.length - 1);
+  document.getElementById('q-progress').textContent=(currentQ+1)+'/'+qs.length;
   const answered = Object.keys(answers).filter(k=>answers[k]!==undefined&&answers[k]!=='').length;
   document.getElementById('q-prog-label').textContent=answered+' answered';
-  document.getElementById('q-prog-fill').style.width=Math.round(answered/qs.length*100)+'%';
-  document.getElementById('btn-prev').style.display=idx===0?'none':'';
-  document.getElementById('btn-next').style.display=idx===qs.length-1?'none':'';
-  document.getElementById('btn-submit').style.display=idx===qs.length-1?'':'none';
-  const q = qs[idx];
-  let html = `<div class="q-block"><span class="q-num-badge">Q${idx+1} of ${qs.length}</span><div class="q-text">${escHtml(q.text)}</div>`;
-  if(q.qtype==='mcq'){
-    html += q.choices.map((c,i)=>`
-      <div class="choice-opt ${answers[idx]===i?'selected':''}" onclick="selectAnswer(${idx},${i})">
-        <input type="radio" name="q${idx}" value="${i}" ${answers[idx]===i?'checked':''} onchange="selectAnswer(${idx},${i})"/>
-        <span>${String.fromCharCode(65+i)}. ${escHtml(c)}</span>
-      </div>`).join('');
-  }else if(q.qtype==='tf'){
-    html += ['True','False'].map((c,i)=>`
-      <div class="choice-opt ${answers[idx]===c.toLowerCase()?'selected':''}" onclick="selectAnswer(${idx},'${c.toLowerCase()}')">
-        <input type="radio" name="q${idx}" value="${c.toLowerCase()}" ${answers[idx]===c.toLowerCase()?'checked':''}/>
-        <span>${c}</span>
-      </div>`).join('');
+  document.getElementById('q-prog-fill').style.width=Math.round((answered/Math.max(qs.length,1))*100)+'%';
+  const showAllQuestions = false;
+
+  const prevInline = document.getElementById('btn-prev-inline');
+  const nextInline = document.getElementById('btn-next-inline');
+  if(prevInline) prevInline.style.display = currentQ === 0 ? 'none' : '';
+  if(nextInline) nextInline.style.display = currentQ >= qs.length - 1 ? 'none' : '';
+  const submitBtn = document.getElementById('btn-submit');
+  if(submitBtn) submitBtn.style.display = currentQ >= qs.length - 1 ? '' : 'none';
+  let html = '';
+
+  if(showAllQuestions){
+    html = qs.map((q,i)=>{
+      let card = `<div class="q-block" style="display:block"><span class="q-num-badge">Q${i+1} of ${qs.length}</span><div class="q-text">${escHtml(q.text)}</div>`;
+      if(q.qtype==='mcq'){
+        card += (q.choices||[]).map((c,j)=>`
+          <div class="choice-opt ${answers[i]===j?'selected':''}" onclick="selectAnswer(${i},${j})">
+            <input type="radio" name="q${i}" value="${j}" ${answers[i]===j?'checked':''} onchange="selectAnswer(${i},${j})"/>
+            <span>${String.fromCharCode(65+j)}. ${escHtml(c)}</span>
+          </div>`).join('');
+      }else if(q.qtype==='tf'){
+        card += ['True','False'].map((c,j)=>`
+          <div class="choice-opt ${answers[i]===c.toLowerCase()?'selected':''}" onclick="selectAnswer(${i},'${c.toLowerCase()}')">
+            <input type="radio" name="q${i}" value="${c.toLowerCase()}" ${answers[i]===c.toLowerCase()?'checked':''}/>
+            <span>${c}</span>
+          </div>`).join('');
+      }else{
+        card += `<textarea class="short-answer" placeholder="Type your answer here..." onchange="selectAnswer(${i},this.value)" oninput="selectAnswer(${i},this.value)">${answers[i]||''}</textarea>`;
+      }
+      return card + '</div>';
+    }).join('');
   }else{
-    html += `<textarea class="short-answer" placeholder="Type your answer here..." onchange="selectAnswer(${idx},this.value)" oninput="selectAnswer(${idx},this.value)">${answers[idx]||''}</textarea>`;
+    const q = qs[currentQ];
+    html = `<div class="q-block"><span class="q-num-badge">Q${currentQ+1} of ${qs.length}</span><div class="q-text">${escHtml(q.text)}</div>`;
+    if(q.qtype==='mcq'){
+      html += (q.choices||[]).map((c,j)=>`
+        <div class="choice-opt ${answers[currentQ]===j?'selected':''}" onclick="selectAnswer(${currentQ},${j})">
+          <input type="radio" name="q${currentQ}" value="${j}" ${answers[currentQ]===j?'checked':''} onchange="selectAnswer(${currentQ},${j})"/>
+          <span>${String.fromCharCode(65+j)}. ${escHtml(c)}</span>
+        </div>`).join('');
+    }else if(q.qtype==='tf'){
+      const tfChoices = Array.isArray(q.choices) && q.choices.length ? q.choices : ['true','false'];
+      html += tfChoices.map((choiceValue, j)=>{
+        const label = choiceValue === 'true' ? 'True' : choiceValue === 'false' ? 'False' : choiceValue;
+        const value = String(choiceValue).toLowerCase();
+        return `<div class="choice-opt ${answers[currentQ]===value?'selected':''}" onclick="selectAnswer(${currentQ},'${value}')">
+          <input type="radio" name="q${currentQ}" value="${value}" ${answers[currentQ]===value?'checked':''} onchange="selectAnswer(${currentQ},'${value}')"/>
+          <span>${label}</span>
+        </div>`;
+      }).join('');
+    }else{
+      html += `<textarea class="short-answer" placeholder="Type your answer here..." onchange="selectAnswer(${currentQ},this.value)" oninput="selectAnswer(${currentQ},this.value)">${answers[currentQ]||''}</textarea>`;
+    }
+    html += '</div>';
   }
-  html += '</div>';
-  document.getElementById('question-area').innerHTML = html;
+
+  const area = document.getElementById('question-area');
+  if(area){
+    area.style.display = 'block';
+    area.innerHTML = html;
+  }
 }
 
 function selectAnswer(qi,val){
@@ -2451,7 +2605,7 @@ function setStartButtonEnabled(enabled){
 }
 
 function updateStartButtonState(){
-  setStartButtonEnabled(calibrationPassed && !examPausedDueCamera);
+  setStartButtonEnabled(!examPausedDueCamera);
 }
 
 function updateCalibrationProgress(faceSeen){
