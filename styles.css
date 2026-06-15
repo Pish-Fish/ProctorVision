@@ -12,8 +12,10 @@ body{font-family:'DM Sans',sans-serif;background:linear-gradient(160deg,#edf4ff 
 
 /* ── ROLE PICKER ── */
 #role-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;gap:2.5rem;padding:2rem 1rem;background:radial-gradient(circle at top, rgba(65,105,225,.12), transparent 24%),linear-gradient(145deg,#edf4ff 0%,#f8fbff 45%,#fffaf0 100%)}
-#role-screen h1{font-family:'DM Serif Display',serif;font-size:2rem;letter-spacing:.01em;color:#1e3a8a}
-#role-screen p{color:var(--muted);font-size:.95rem;margin-top:-.5rem}
+.role-logo{width:112px;height:112px;border-radius:50%;object-fit:cover;background:#fff;border:3px solid rgba(255,255,255,.9);box-shadow:0 12px 30px rgba(30,58,138,.18);margin:0 auto 1rem;display:block}
+#role-screen h1{font-size:1.55rem;line-height:1.2;font-weight:700;letter-spacing:.08em;color:#1e3a8a;text-transform:uppercase}
+#role-screen h2{font-family:'DM Serif Display',serif;font-size:1.9rem;line-height:1.1;letter-spacing:.01em;color:#4169e1;font-weight:400;margin-top:.25rem}
+#role-screen p{color:var(--muted);font-size:.95rem;margin-top:.15rem}
 .role-cards{display:flex;gap:1.25rem}
 .role-card{
   background:linear-gradient(145deg,#ffffff 0%,#edf4ff 45%,#fffaf0 100%);
@@ -51,10 +53,19 @@ body{font-family:'DM Sans',sans-serif;background:linear-gradient(160deg,#edf4ff 
 #app-shell{display:none;flex-direction:column;flex:1}
 
 .topbar{color:#fff;display:flex;align-items:center;padding:0 1.5rem;height:58px;gap:1rem;position:sticky;top:0;z-index:100;box-shadow:0 2px 8px rgba(15,23,42,.18);background:linear-gradient(135deg,#1e3a8a 0%,#4169e1 100%)}
-.topbar .logo{font-family:'DM Serif Display',serif;font-size:1.18rem;letter-spacing:.01em;color:#fff;flex:1}
-.topbar .logo span{font-size:.75rem;font-family:'DM Sans',sans-serif;margin-left:.5rem;font-weight:400;opacity:.8}
-.topbar .user-pill{display:flex;align-items:center;gap:.5rem;background:rgba(255,255,255,.1);border-radius:20px;padding:.3rem .85rem .3rem .45rem;font-size:.82rem}
+.topbar .logo{font-family:'DM Serif Display',serif;font-size:1.18rem;letter-spacing:.01em;color:#fff;flex:1;display:flex;align-items:center;gap:.55rem;min-width:0}
+.topbar .brand-logo{width:34px;height:34px;border-radius:50%;object-fit:cover;background:#fff;border:1px solid rgba(255,255,255,.55);box-shadow:0 1px 4px rgba(15,23,42,.2);flex:0 0 auto}
+.topbar .brand-name{font-family:'DM Serif Display',serif;font-size:1.18rem;font-weight:400;opacity:1;white-space:nowrap}
+.topbar .logo #portal-label{font-size:.75rem;font-family:'DM Sans',sans-serif;margin-left:.15rem;font-weight:400;opacity:.8;white-space:nowrap}
+.topbar .topbar-actions{position:relative}
+.topbar .topbar-user-wrap{position:relative;display:flex;align-items:center}
+.topbar .user-pill{display:flex;align-items:center;gap:.5rem;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.18);border-radius:20px;padding:.3rem .85rem .3rem .45rem;font-size:.82rem;color:#fff;cursor:pointer;font-family:'DM Sans',sans-serif}
+.topbar .user-pill:hover{background:rgba(255,255,255,.18)}
 .topbar .avatar{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:.72rem;color:#fff}
+.topbar .student-accounts-menu{position:absolute;top:calc(100% + .45rem);right:0;display:flex;flex-direction:column;gap:.35rem;min-width:260px;padding:.45rem;background:#fff;border:1px solid #e5e7eb;border-radius:14px;box-shadow:0 18px 35px rgba(15,23,42,.18);z-index:120}
+.topbar .student-account-chip{display:block;width:100%;text-align:left;border:1px solid var(--border);background:#fff;border-radius:10px;padding:.45rem .55rem;font-size:.82rem;color:#111827;cursor:pointer;font-family:'DM Sans',sans-serif}
+.topbar .student-account-chip:hover{background:#f8fafc}
+.topbar .student-account-chip.active{background:linear-gradient(135deg,#fffaf0,#fef3c7);border-color:#d4af37}
 .topbar .switch-btn{margin-left:.5rem;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);color:#fff;border-radius:8px;padding:.3rem .75rem;font-size:.75rem;cursor:pointer;font-family:'DM Sans',sans-serif;transition:background .15s}
 .topbar .switch-btn:hover{background:rgba(255,255,255,.25)}
 
@@ -146,6 +157,18 @@ tr:hover td{background:#f8fafc}
 .course-card .cc-title{font-weight:600;font-size:.9rem;margin-bottom:.25rem}
 .course-card .cc-sub{font-size:.75rem;color:var(--muted)}
 .course-card .cc-foot{border-top:1px solid var(--border);padding:.6rem 1rem;display:flex;justify-content:space-between;align-items:center}
+.course-student-row-modal{display:flex;align-items:center;justify-content:space-between;gap:.75rem;padding:.55rem 0;border-top:1px solid var(--border)}
+.course-student-row-modal:first-child{border-top:none}
+.course-student-row-modal span{font-size:.88rem}
+.course-join-code{margin-top:.75rem;border:1px solid rgba(65,105,225,.18);background:rgba(65,105,225,.06);border-radius:8px;padding:.55rem .65rem;display:flex;align-items:center;justify-content:space-between;gap:.75rem}
+.course-join-code.empty{background:#f8fafc;border-color:var(--border)}
+.course-join-code span{font-size:.68rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600}
+.course-join-code strong{font-size:.88rem;color:#1e3a8a;font-weight:700;letter-spacing:.04em}
+.course-join-code.empty strong{color:var(--muted);font-weight:600;letter-spacing:0}
+.enroll-card{max-width:620px}
+.enroll-row{display:flex;gap:.6rem;align-items:center}
+.enroll-row input{text-transform:uppercase}
+.enroll-row .btn{flex:0 0 auto}
 /* Student course card (no footer) */
 .course-card-s{background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden}
 .course-card-s .cc-banner{height:70px;display:flex;align-items:center;justify-content:center;font-size:1.7rem}

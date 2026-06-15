@@ -18,7 +18,9 @@
 ═════════════════════════════════════════════ -->
 <div id="role-screen">
   <div style="text-align:center">
-    <h1>ProctorVision</h1>
+    <img src="assets/imms-logo.jpg" alt="IMMS logo" class="role-logo"/>
+    <h1>ILOILO MERCHANT MARINE SCHOOL</h1>
+    <h2>ProctorVision</h2>
     <p>Select your portal to continue</p>
   </div>
   <div class="role-cards">
@@ -45,11 +47,18 @@
 ═════════════════════════════════════════════ -->
 <div id="app-shell">
   <div class="topbar" id="topbar">
-    <div class="logo" id="topbar-logo">ProctorVision <span id="portal-label"></span></div>
-    <div style="display:flex;align-items:center;gap:.75rem">
-      <div class="user-pill">
-        <div class="avatar" id="user-avatar"></div>
-        <span id="user-name"></span>
+    <div class="logo" id="topbar-logo">
+      <img src="assets/imms-logo.jpg" alt="IMMS logo" class="brand-logo"/>
+      <span class="brand-name">IMMS</span>
+      <span id="portal-label"></span>
+    </div>
+    <div style="display:flex;align-items:center;gap:.75rem;flex-wrap:wrap;justify-content:flex-end" class="topbar-actions">
+      <div class="topbar-user-wrap">
+        <button class="user-pill" id="student-account-trigger" type="button" onclick="toggleStudentAccountMenu()" aria-expanded="false" aria-controls="student-account-switcher-strip">
+          <div class="avatar" id="user-avatar"></div>
+          <span id="user-name"></span>
+        </button>
+        <div id="student-account-switcher-strip" class="student-accounts-menu" style="display:none"></div>
       </div>
       <button class="switch-btn" onclick="switchPortal()">⇄ Switch Portal</button>
     </div>
@@ -202,7 +211,6 @@
       <hr style="border:none;border-top:1px solid var(--border);margin:1rem 0"/>
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem">
         <div style="font-weight:600;font-size:.9rem">Questions</div>
-        <button class="btn btn-ghost btn-sm" onclick="addQuestion()">Add Question</button>
       </div>
       <div id="questions-container"></div>
     </div>
@@ -238,6 +246,35 @@
 
 <!-- session modal removed: monitoring is now exam-based and automatic -->
 
+<div class="overlay" id="course-students-modal">
+  <div class="modal" style="width:480px">
+    <div class="modal-header">
+      <h2 id="course-students-title">Enrolled Students</h2>
+      <button class="btn btn-ghost btn-sm" onclick="closeCourseStudentsModal()">Close</button>
+    </div>
+    <div class="modal-body" id="course-students-body"></div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeCourseStudentsModal()">Close</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="answer-review-modal">
+  <div class="modal" style="width:860px;max-width:96vw">
+    <div class="modal-header">
+      <h2 id="answer-review-title">Student Answer Review</h2>
+      <button class="btn btn-ghost btn-sm" onclick="closeAnswerReviewModal()">Close</button>
+    </div>
+    <div class="modal-body">
+      <p style="margin:0 0 .75rem;color:var(--muted);font-size:.92rem">This panel shows the student answers directly in the app for quick review.</p>
+      <div id="answer-review-body"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeAnswerReviewModal()">Close</button>
+    </div>
+  </div>
+</div>
+
 <div class="overlay" id="proctor-modal">
   <div class="modal">
     <div class="modal-header">
@@ -260,7 +297,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/face-detection@1.0.2/dist/face-detection.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/dist/coco-ssd.min.js"></script>
 <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
-<script src="app.js?v=20260614"></script>
+<script src="app.js?v=20260616"></script>
 
 </body>
 </html>

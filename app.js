@@ -2,8 +2,19 @@
 // SHARED DATA
 // ════════════════════════════════════════
 const STORAGE_KEY = 'lms_data_v2';
-const STUDENT_NAME = 'Juan Dela Cruz';
-const STUDENT_COURSES = ['c1','c2','c3'];
+const STUDENT_ACCOUNTS = [
+  { id:'stu1', name:'Juan Dela Cruz', initials:'JD', studentId:'2024-0001', email:'juan.delacruz@student.imms.edu.ph', program:'BS Marine Transportation', year:'1st Year' },
+  { id:'stu2', name:'Maria Santos', initials:'MS', studentId:'2024-0002', email:'maria.santos@student.imms.edu.ph', program:'BS Marine Engineering', year:'1st Year' },
+  { id:'stu3', name:'Pedro Reyes', initials:'PR', studentId:'2024-0003', email:'pedro.reyes@student.imms.edu.ph', program:'BS Marine Transportation', year:'2nd Year' },
+  { id:'stu4', name:'Ana Lim', initials:'AL', studentId:'2024-0004', email:'ana.lim@student.imms.edu.ph', program:'BS Customs Administration', year:'1st Year' },
+  { id:'stu5', name:'Carlo Mendoza', initials:'CM', studentId:'2024-0005', email:'carlo.mendoza@student.imms.edu.ph', program:'BS Marine Engineering', year:'2nd Year' },
+  { id:'stu6', name:'Rhea Dizon', initials:'RD', studentId:'2024-0006', email:'rhea.dizon@student.imms.edu.ph', program:'BS Customs Administration', year:'2nd Year' },
+  { id:'stu7', name:'Kevin Cruz', initials:'KC', studentId:'2024-0007', email:'kevin.cruz@student.imms.edu.ph', program:'BS Marine Engineering', year:'2nd Year' },
+  { id:'stu8', name:'Liza Bautista', initials:'LB', studentId:'2024-0008', email:'liza.bautista@student.imms.edu.ph', program:'BS Marine Transportation', year:'1st Year' },
+  { id:'stu9', name:'Mark Tolentino', initials:'MT', studentId:'2024-0009', email:'mark.tolentino@student.imms.edu.ph', program:'BS Customs Administration', year:'2nd Year' },
+];
+let currentStudentId = localStorage.getItem('pv_current_student_id') || STUDENT_ACCOUNTS[0].id;
+let STUDENT_NAME = getCurrentStudent().name;
 
 let currentRole = null;
 let data = loadData();
@@ -126,9 +137,10 @@ function randomizeExamQuestions(exam){
     }
 
     if(question.qtype === 'tf'){
-      const tfChoices = ['true', 'false'];
-      const tfOrder = shuffleArray(tfChoices);
-      randomized.choices = tfOrder;
+      const tfChoices = Array.isArray(question.choices) && question.choices.length
+        ? question.choices
+        : ['true', 'false'];
+      randomized.choices = shuffleArray(tfChoices);
     }
 
     return randomized;
@@ -158,6 +170,7 @@ function loadData(){
       ],
       exams: parsed?.exams ?? [],
       sessions: parsed?.sessions ?? [],
+      studentEnrollments: parsed?.studentEnrollments ?? [],
       studentJoins: parsed?.studentJoins ?? [],
       submissions: parsed?.submissions ?? [],
       liveEvents: parsed?.liveEvents ?? []
@@ -171,6 +184,7 @@ function loadData(){
       ],
       exams:[],
       sessions:[],
+      studentEnrollments:[],
       studentJoins:[],
       submissions:[],
       liveEvents:[],
@@ -198,6 +212,61 @@ function toast(msg, d=4200){
   setTimeout(()=>t.classList.remove('show'), d);
 }
 function escHtml(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+function getCurrentStudent(){
+  return STUDENT_ACCOUNTS.find(s=>s.id===currentStudentId) || STUDENT_ACCOUNTS[0];
+}
+
+function updateStudentIdentity(){
+  const student = getCurrentStudent();
+  STUDENT_NAME = student.name;
+  const avatar = document.getElementById('user-avatar');
+  const name = document.getElementById('user-name');
+  if(avatar) avatar.textContent = student.initials;
+  if(name) name.textContent = student.name;
+}
+
+function switchStudentAccount(studentId){
+  if(!STUDENT_ACCOUNTS.some(s=>s.id===studentId)) return;
+  currentStudentId = studentId;
+  localStorage.setItem('pv_current_student_id', currentStudentId);
+  updateStudentIdentity();
+  data = loadData();
+  if(currentRole === 'student'){
+    const activePage = document.querySelector('.page.active')?.id?.replace('page-','') || 'dashboard';
+    renderStudentAccountSwitcher();
+    if(activePage === 'dashboard') renderStudentDashboard();
+    if(activePage === 'courses') renderStudentCourses();
+    if(activePage === 'exams') renderAvailableExams();
+    if(activePage === 'results') renderStudentResults();
+    if(activePage === 'profile') renderStudentProfile();
+    toast(`Switched to ${getCurrentStudent().name}.`);
+  }
+}
+
+function normalizeCode(value){
+  return String(value || '').trim().toUpperCase().replace(/\s+/g, '');
+}
+
+function generateCourseJoinCode(){
+  const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  const group = () => Array.from({ length: 4 }, () => letters[Math.floor(Math.random() * letters.length)]).join('');
+  let code = '';
+  do {
+    code = `${group()}-${group()}`;
+  } while(data.courses?.some(c => normalizeCode(c.joinCode) === normalizeCode(code)));
+  return code;
+}
+
+function getCourseJoinCode(course){
+  return course?.joinCode || course?.enrollCode || '';
+}
+
+function getEnrolledCourseIds(){
+  return (data.studentEnrollments || [])
+    .filter(e => e.studentName === STUDENT_NAME)
+    .map(e => e.courseId);
+}
 
 // ════════════════════════════════════════
 // PROCTORVISION BACKEND (Flask + SQLite + Socket.IO)
@@ -393,14 +462,26 @@ function downloadBackendPdf(submissionId){
 // ════════════════════════════════════════
 // PORTAL SWITCHING
 // ════════════════════════════════════════
+function setStudentAccountControlsVisible(visible){
+  const wrap = document.querySelector('.topbar-user-wrap');
+  const trigger = document.getElementById('student-account-trigger');
+  const menu = document.getElementById('student-account-switcher-strip');
+
+  if(wrap) wrap.style.display = visible ? '' : 'none';
+  if(trigger) trigger.setAttribute('aria-expanded', 'false');
+  if(menu) menu.style.display = 'none';
+}
+
 function enterPortal(role){
   currentRole = role;
   data = loadData();
   document.getElementById('role-screen').style.display = 'none';
+  setStudentAccountControlsVisible(role === 'student');
   const shell = document.getElementById('app-shell');
   shell.style.display = 'flex';
 
   if(role === 'admin'){
+    setStudentAccountControlsVisible(false);
     // Theme
     document.documentElement.style.setProperty('--sidebar','#ffffff');
     document.documentElement.style.setProperty('--sidebar-hover','#fff8e1');
@@ -418,6 +499,7 @@ function enterPortal(role){
     navAdmin('dashboard', null);
     initBackend('admin');
   } else if(role === 'teacher'){
+    setStudentAccountControlsVisible(false);
     // Theme
     document.documentElement.style.setProperty('--sidebar','#ffffff');
     document.documentElement.style.setProperty('--sidebar-hover','#fff8e1');
@@ -435,6 +517,7 @@ function enterPortal(role){
     navTeacher('dashboard', null);
     initBackend('teacher');
   } else {
+    setStudentAccountControlsVisible(true);
     // Theme
     document.documentElement.style.setProperty('--sidebar','#ffffff');
     document.documentElement.style.setProperty('--sidebar-hover','#fff8e1');
@@ -455,6 +538,7 @@ function enterPortal(role){
 }
 
 function switchPortal(){
+  setStudentAccountControlsVisible(false);
   data = loadData();
   document.getElementById('app-shell').style.display = 'none';
   document.getElementById('role-screen').style.display = 'flex';
@@ -581,7 +665,7 @@ function navTeacher(page, el){
   document.getElementById('page-'+page).classList.add('active');
   if(el){ el.classList.add('active'); el.style.background='linear-gradient(90deg, #d4af37 0%, #f1de9a 100%)'; el.style.color='#111827'; }
   if(page==='dashboard') renderTeacherDashboard();
-  if(page==='courses') renderCourses();
+  if(page==='courses') renderCoursesWithEnrollmentCodes();
   if(page==='exams') renderExams();
   if(page==='sessions') renderTeacherSessions();
   if(page==='results') renderTeacherResults();
@@ -627,6 +711,87 @@ function renderCourses(){
     </div>`).join('');
 }
 
+function renderCoursesWithEnrollmentCodes(){
+  const g = document.getElementById('course-grid');
+  if(!g) return;
+  if(!data.courses.length){
+    g.innerHTML='<div class="empty-state" style="grid-column:1/-1"><div class="icon">Info</div><p>No courses yet. Create one!</p></div>';
+    return;
+  }
+  const colors = ['#dbeafe','#dcfce7','#fef9c3','#fce7f3','#e0e7ff'];
+  g.innerHTML = data.courses.map((c,i)=>{
+    const enrolledStudents = (data.studentEnrollments || []).filter(e=>e.courseId===c.id);
+    const enrollments = enrolledStudents.length;
+    const joinCode = getCourseJoinCode(c);
+    return `<div class="course-card">
+      <div class="cc-banner" style="background:${colors[i%colors.length]}">${escHtml(c.icon||'Course')}</div>
+      <div class="cc-body">
+        <div class="cc-title">${escHtml(c.name)}</div>
+        <div class="cc-sub">${escHtml(c.code||'')}${c.desc?' · '+escHtml(c.desc):''}</div>
+        <div class="course-join-code ${joinCode?'':'empty'}">
+          <span>Enrollment Code</span>
+          <strong>${joinCode ? escHtml(joinCode) : 'Not generated'}</strong>
+        </div>
+      </div>
+      <div class="cc-foot">
+        <span style="font-size:.75rem;color:var(--muted)">${data.exams.filter(e=>e.course===c.id).length} assessments · ${enrollments} enrolled</span>
+        <div style="display:flex;gap:.4rem;align-items:center">
+          <button class="btn btn-ghost btn-sm" type="button" onclick="openCourseStudentsModal('${c.id}')">Students</button>
+          <button class="btn btn-ghost btn-sm" onclick="generateCourseCode('${c.id}')">${joinCode?'Regenerate Code':'Generate Code'}</button>
+          <button class="btn btn-ghost btn-sm" onclick="deleteCourse('${c.id}')">Delete</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function openCourseStudentsModal(courseId){
+  const course = data.courses.find(c=>c.id===courseId);
+  const students = (data.studentEnrollments || []).filter(e=>e.courseId===courseId);
+  const modal = document.getElementById('course-students-modal');
+  const body = document.getElementById('course-students-body');
+  const title = document.getElementById('course-students-title');
+  if(!course || !modal || !body || !title) return;
+  title.textContent = `${course.name} — Enrolled Students`;
+  body.innerHTML = students.length
+    ? students.map(e => `
+      <div class="course-student-row-modal">
+        <span>${escHtml(e.studentName || 'Unknown student')}</span>
+        <button class="btn btn-danger btn-sm" type="button" onclick="removeStudentFromCourse('${courseId}','${e.id}')">Remove</button>
+      </div>`).join('')
+    : '<div class="empty-state" style="padding:1rem 0"><div class="icon">Info</div><p>No students are enrolled in this course.</p></div>';
+  modal.classList.add('show');
+}
+
+function closeCourseStudentsModal(){
+  const modal = document.getElementById('course-students-modal');
+  if(modal) modal.classList.remove('show');
+}
+
+
+function removeStudentFromCourse(courseId, enrollmentId){
+  const enrollment = (data.studentEnrollments || []).find(e=>e.id===enrollmentId && e.courseId===courseId);
+  if(!enrollment){ toast('Enrollment record not found.'); return; }
+  if(!confirm(`Remove ${enrollment.studentName || 'this student'} from this course?`)) return;
+
+  data = loadData();
+  data.studentEnrollments = (data.studentEnrollments || []).filter(e=>!(e.id===enrollmentId && e.courseId===courseId));
+  saveData();
+  renderCoursesWithEnrollmentCodes();
+  renderTeacherDashboard();
+  toast('Student removed from the course.');
+}
+
+function generateCourseCode(courseId){
+  data = loadData();
+  const course = data.courses.find(c=>c.id===courseId);
+  if(!course){ toast('Course not found.'); return; }
+  course.joinCode = generateCourseJoinCode();
+  saveData();
+  renderCoursesWithEnrollmentCodes();
+  toast(`Course code generated: ${course.joinCode}`);
+}
+
 function openCourseModal(){ document.getElementById('course-modal').classList.add('show'); }
 function saveCourse(){
   const name = document.getElementById('c-name').value.trim();
@@ -635,13 +800,14 @@ function saveCourse(){
   data.courses.push(course); saveData();
   document.getElementById('course-modal').classList.remove('show');
   ['c-name','c-code','c-desc'].forEach(id=>document.getElementById(id).value='');
-  renderCourses(); toast('Course created!');
+  renderCoursesWithEnrollmentCodes(); toast('Course created!');
 }
 function deleteCourse(id){
   if(!confirm('Delete this course?')) return;
   data.courses = data.courses.filter(c=>c.id!==id);
   data.exams = data.exams.filter(e=>e.course!==id);
-  saveData(); renderCourses(); toast('Course deleted');
+  data.studentEnrollments = (data.studentEnrollments || []).filter(e=>e.courseId!==id);
+  saveData(); renderCoursesWithEnrollmentCodes(); toast('Course deleted');
 }
 
 function renderExams(){
@@ -701,6 +867,25 @@ function editExam(id){
 
 function closeExamModal(){ document.getElementById('exam-modal').classList.remove('show'); editingExamId=null; }
 
+function updateQuestionAddButtons(){
+  const cards = Array.from(document.querySelectorAll('.q-card'));
+  cards.forEach(card => {
+    card.querySelector('.add-question-btn')?.remove();
+    const actionWrap = card.querySelector('.q-card-actions');
+    if(actionWrap) actionWrap.remove();
+  });
+  const lastCard = cards[cards.length - 1];
+  if(lastCard){
+    const actionWrap = document.createElement('div');
+    actionWrap.className = 'q-card-actions';
+    actionWrap.style.display = 'flex';
+    actionWrap.style.justifyContent = 'flex-end';
+    actionWrap.style.marginTop = '.5rem';
+    actionWrap.innerHTML = '<button class="btn btn-primary btn-sm add-question-btn" type="button" onclick="addQuestion()" title="Add next question" aria-label="Add next question">＋</button>';
+    lastCard.appendChild(actionWrap);
+  }
+}
+
 function addQuestion(existing){
   const qc = document.getElementById('questions-container');
   if(!qc){ return; }
@@ -725,6 +910,7 @@ function addQuestion(existing){
   `;
   qc.appendChild(div);
   renderChoices(qi, existing);
+  updateQuestionAddButtons();
   qc.style.display='block';
   qc.style.visibility='visible';
   requestAnimationFrame(() => {
@@ -753,6 +939,7 @@ function removeQ(qi){
   if(!el) return;
   el.remove();
   renumberQuestionCards();
+  updateQuestionAddButtons();
 }
 
 function renumberQuestionCards(){
@@ -781,6 +968,7 @@ function renumberQuestionCards(){
     });
   });
   qCount = cards.length;
+  updateQuestionAddButtons();
 }
 
 function saveExam(status){
@@ -848,7 +1036,8 @@ function renderTeacherResults(){
       <td><span class="pill ${riskClass}">${suspicion}% ${riskLabel}</span></td>
       <td><span class="pill ${pct>=75?'pill-green':pct>=50?'pill-yellow':'pill-red'}">${pct>=75?'Passed':'Failed'}</span></td>
       <td><button class="btn btn-ghost btn-sm" onclick="openProctorReport('${s.id}')">View Report</button>
-        <button class="btn btn-ghost btn-sm" onclick="downloadBackendPdf('${s.id}')">PDF</button></td>
+        <button class="btn btn-ghost btn-sm" onclick="downloadBackendPdf('${s.id}')">PDF</button>
+        <button class="btn btn-ghost btn-sm" type="button" onclick="openStudentAnswersSpreadsheet('${s.id}')">View Answers</button></td>
     </tr>`;
   }).join('');
 }
@@ -872,6 +1061,47 @@ function renderGrades(){
 // ════════════════════════════════════════
 // STUDENT UI
 // ════════════════════════════════════════
+function renderStudentAccountSwitcher(){
+  const container = document.getElementById('student-account-switcher-strip');
+  if(!container) return;
+
+  const current = getCurrentStudent();
+  container.innerHTML = STUDENT_ACCOUNTS.map(student => `
+    <button
+      type="button"
+      class="student-account-chip${student.id === current.id ? ' active' : ''}"
+      onclick="switchStudentAccount('${student.id}'); closeStudentAccountMenu();"
+      title="Switch to ${student.name}"
+    >${student.name}</button>
+  `).join('');
+}
+
+function toggleStudentAccountMenu(){
+  const menu = document.getElementById('student-account-switcher-strip');
+  const trigger = document.getElementById('student-account-trigger');
+  if(!menu || !trigger) return;
+
+  const shouldOpen = menu.style.display === 'none' || menu.style.display === '';
+  menu.style.display = shouldOpen ? 'flex' : 'none';
+  trigger.setAttribute('aria-expanded', String(shouldOpen));
+}
+
+function closeStudentAccountMenu(){
+  const menu = document.getElementById('student-account-switcher-strip');
+  const trigger = document.getElementById('student-account-trigger');
+  if(menu) menu.style.display = 'none';
+  if(trigger) trigger.setAttribute('aria-expanded', 'false');
+}
+
+window.addEventListener('click', (event) => {
+  const trigger = document.getElementById('student-account-trigger');
+  const menu = document.getElementById('student-account-switcher-strip');
+  if(!trigger || !menu) return;
+
+  const clickedInside = trigger.contains(event.target) || menu.contains(event.target);
+  if(!clickedInside) closeStudentAccountMenu();
+});
+
 function buildStudentUI(){
   document.getElementById('sidebar').innerHTML = `
     <div class="section-label" style="color:#374151">Main</div>
@@ -895,12 +1125,14 @@ function buildStudentUI(){
     a.addEventListener('mouseleave',()=>{ if(!a.classList.contains('active')) { a.style.background=''; a.style.color='#111827'; } });
   });
 
+  const student = getCurrentStudent();
+
   document.getElementById('main-content').innerHTML = `
     <!-- STUDENT DASHBOARD -->
     <div class="page active" id="page-dashboard">
-      <div class="page-hdr"><div><h1>Welcome back, Juan!</h1><p>Here's your academic overview.</p></div></div>
+      <div class="page-hdr"><div><h1>Welcome back, ${student.name.split(' ')[0]}!</h1><p>Here's your academic overview.</p></div></div>
       <div class="stat-grid">
-        <div class="stat-card"><div class="icon">Courses</div><div class="num" id="sd-courses">3</div><div class="lbl">Enrolled Courses</div></div>
+        <div class="stat-card"><div class="icon">Courses</div><div class="num" id="sd-courses">0</div><div class="lbl">Enrolled Courses</div></div>
         <div class="stat-card"><div class="icon">Assessments</div><div class="num" id="sd-available">0</div><div class="lbl">Available Assessments</div></div>
         <div class="stat-card"><div class="icon">Completed</div><div class="num" id="sd-done">0</div><div class="lbl">Completed</div></div>
         <div class="stat-card"><div class="icon">Avg</div><div class="num" id="sd-avg">—</div><div class="lbl">Avg. Score</div></div>
@@ -915,7 +1147,17 @@ function buildStudentUI(){
 
     <!-- COURSES -->
     <div class="page" id="page-courses">
-      <div class="page-hdr"><div><h1>My Courses</h1><p>Your enrolled courses this semester</p></div></div>
+      <div class="page-hdr"><div><h1>My Courses</h1><p>Your enrolled courses this semester</p></div><button class="btn btn-primary" onclick="openStudentCourseEnroll()">Add Course</button></div>
+      <div class="card enroll-card" id="student-enroll-card" style="display:none">
+        <div class="form-group" style="margin-bottom:0">
+          <label>Course Enrollment Code</label>
+          <div class="enroll-row">
+            <input type="text" id="student-course-code" placeholder="e.g. IJKL-WASD" maxlength="9" onkeydown="if(event.key==='Enter') enrollInCourseByCode()"/>
+            <button class="btn btn-primary" onclick="enrollInCourseByCode()">Enroll</button>
+            <button class="btn btn-ghost" onclick="closeStudentCourseEnroll()">Cancel</button>
+          </div>
+        </div>
+      </div>
       <div class="course-grid" id="s-course-grid"></div>
     </div>
 
@@ -936,18 +1178,20 @@ function buildStudentUI(){
       <div class="page-hdr"><div><h1>My Profile</h1></div></div>
       <div class="card" style="max-width:480px">
         <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem">
-          <div style="width:60px;height:60px;border-radius:50%;background:#dcfce7;display:flex;align-items:center;justify-content:center;font-size:1.5rem;font-weight:700;color:#16a34a">JD</div>
-          <div><div style="font-weight:600;font-size:1.05rem">Juan Dela Cruz</div><div style="color:var(--muted);font-size:.85rem">Student · IT Fundamentals</div></div>
+          <div style="width:60px;height:60px;border-radius:50%;background:#dcfce7;display:flex;align-items:center;justify-content:center;font-size:1.5rem;font-weight:700;color:#16a34a">${student.initials}</div>
+          <div><div style="font-weight:600;font-size:1.05rem">${student.name}</div><div style="color:var(--muted);font-size:.85rem">Student · ${student.program}</div></div>
         </div>
         <div style="display:grid;gap:.85rem;font-size:.86rem">
-          <div style="display:flex;justify-content:space-between;padding:.55rem 0;border-bottom:1px solid var(--border)"><span style="color:var(--muted)">Student ID</span><span style="font-weight:500">2024-0001</span></div>
-          <div style="display:flex;justify-content:space-between;padding:.55rem 0;border-bottom:1px solid var(--border)"><span style="color:var(--muted)">Email</span><span>juan.delacruz@student.usa.edu.ph</span></div>
-          <div style="display:flex;justify-content:space-between;padding:.55rem 0;border-bottom:1px solid var(--border)"><span style="color:var(--muted)">Course</span><span>BS Information Technology</span></div>
-          <div style="display:flex;justify-content:space-between;padding:.55rem 0"><span style="color:var(--muted)">Year Level</span><span>1st Year</span></div>
+          <div style="display:flex;justify-content:space-between;padding:.55rem 0;border-bottom:1px solid var(--border)"><span style="color:var(--muted)">Student ID</span><span style="font-weight:500">${student.studentId}</span></div>
+          <div style="display:flex;justify-content:space-between;padding:.55rem 0;border-bottom:1px solid var(--border)"><span style="color:var(--muted)">Email</span><span>${student.email}</span></div>
+          <div style="display:flex;justify-content:space-between;padding:.55rem 0;border-bottom:1px solid var(--border)"><span style="color:var(--muted)">Program</span><span>${student.program}</span></div>
+          <div style="display:flex;justify-content:space-between;padding:.55rem 0"><span style="color:var(--muted)">Year Level</span><span>${student.year}</span></div>
         </div>
       </div>
     </div>
   `;
+
+  renderStudentAccountSwitcher();
 }
 
 function navStudent(page, el){
@@ -968,15 +1212,48 @@ function getJoinedSession(){
   return (data.studentJoins||[]).find(j=>j.studentName===STUDENT_NAME && j.status==='joined');
 }
 function getMyExams(){
-  // Return all published exams for student's enrolled courses.
-  return data.exams.filter(e=>e.status==='published' && STUDENT_COURSES.includes(e.course));
+  const enrolledIds = getEnrolledCourseIds();
+  return data.exams.filter(e=>e.status==='published' && enrolledIds.includes(e.course));
 }
 function getMySubmissions(){ return data.submissions.filter(s=>s.studentName===STUDENT_NAME); }
 function hasSubmitted(examId){ return getMySubmissions().some(s=>s.examId===examId); }
 
+function openStudentCourseEnroll(){
+  const card = document.getElementById('student-enroll-card');
+  if(card) card.style.display = 'block';
+  setTimeout(()=>document.getElementById('student-course-code')?.focus(), 0);
+}
+
+function closeStudentCourseEnroll(){
+  const card = document.getElementById('student-enroll-card');
+  const input = document.getElementById('student-course-code');
+  if(input) input.value = '';
+  if(card) card.style.display = 'none';
+}
+
+function enrollInCourseByCode(){
+  const input = document.getElementById('student-course-code');
+  const code = normalizeCode(input?.value || '');
+  if(!code){ toast('Enter a course enrollment code.'); return; }
+  data = loadData();
+  data.studentEnrollments = data.studentEnrollments || [];
+  const course = data.courses.find(c=>normalizeCode(getCourseJoinCode(c))===code);
+  if(!course){ toast('No course found for that code.'); return; }
+  const already = data.studentEnrollments.some(e=>e.studentName===STUDENT_NAME && e.courseId===course.id);
+  if(already){ toast('You are already enrolled in this course.'); return; }
+  data.studentEnrollments.push({ id:'enr'+Date.now(), studentName:STUDENT_NAME, courseId:course.id, enrolledAt:new Date().toISOString() });
+  saveData();
+  closeStudentCourseEnroll();
+  renderStudentCourses();
+  renderStudentDashboard();
+  toast(`Enrolled in ${course.name}.`);
+}
+
 function renderStudentDashboard(){
   const myExams = getMyExams(), mySubs = getMySubmissions();
+  const myCourses = data.courses.filter(c=>getEnrolledCourseIds().includes(c.id));
   const pending = myExams.filter(e=>!hasSubmitted(e.id));
+  document.getElementById('sd-courses').textContent = myCourses.length;
   document.getElementById('sd-available').textContent = myExams.length;
   document.getElementById('sd-done').textContent = mySubs.length;
   if(mySubs.length){
@@ -984,7 +1261,9 @@ function renderStudentDashboard(){
     document.getElementById('sd-avg').textContent = avg+'%';
   }
   const pendingCard = document.getElementById('dash-pending');
-  if(!myExams.length){
+  if(!myCourses.length){
+    pendingCard.innerHTML = '<div class="empty-state" style="padding:1.5rem"><div class="icon">Info</div><p>Enroll in a course first to see available assessments.</p></div>';
+  } else if(!myExams.length){
     pendingCard.innerHTML = '<div class="empty-state" style="padding:1.5rem"><div class="icon">Info</div><p>No assessments are available at the moment.</p></div>';
   } else if(!pending.length){
     pendingCard.innerHTML = '<div class="empty-state" style="padding:1.5rem"><div class="icon">Info</div><p>All caught up for the current exams!</p></div>';
@@ -1012,8 +1291,12 @@ function renderStudentDashboard(){
 
 function renderStudentCourses(){
   const g = document.getElementById('s-course-grid');
-  const myCourses = data.courses.filter(c=>STUDENT_COURSES.includes(c.id));
+  const myCourses = data.courses.filter(c=>getEnrolledCourseIds().includes(c.id));
   const colors = ['#dbeafe','#dcfce7','#fef9c3'];
+  if(!myCourses.length){
+    g.innerHTML = '<div class="empty-state" style="grid-column:1/-1"><div class="icon">Info</div><p>No enrolled courses yet. Ask your teacher for the course enrollment code.</p></div>';
+    return;
+  }
   g.innerHTML = myCourses.map((c,i)=>{
     const exams = getMyExams().filter(e=>e.course===c.id);
     const done = exams.filter(e=>hasSubmitted(e.id)).length;
@@ -1067,7 +1350,8 @@ function renderStudentSession(){ /* no-op: session page removed; exam monitoring
 function renderAvailableExams(){
   const tb = document.getElementById('avail-tbody');
   const myExams = getMyExams();
-  if(!myExams.length){ tb.innerHTML='<tr><td colspan="7"><div class="empty-state"><div class="icon">Info</div><p>No assessments are currently published.</p></div></td></tr>'; return; }
+  if(!getEnrolledCourseIds().length){ tb.innerHTML='<tr><td colspan="7"><div class="empty-state"><div class="icon">Info</div><p>Enroll in a course first to view published assessments.</p></div></td></tr>'; return; }
+  if(!myExams.length){ tb.innerHTML='<tr><td colspan="7"><div class="empty-state"><div class="icon">Info</div><p>No assessments are currently published for your enrolled courses.</p></div></td></tr>'; return; }
   tb.innerHTML = myExams.map(e=>{
     const course = data.courses.find(c=>c.id===e.course);
     const done = hasSubmitted(e.id);
@@ -1083,6 +1367,106 @@ function renderAvailableExams(){
         :`<button class="btn btn-primary btn-sm" onclick="openExamIntro('${e.id}')">Take Exam</button>`}</td>
     </tr>`;
   }).join('');
+}
+
+function formatAnswerValue(answer, question){
+  if(question?.qtype==='mcq'){
+    const index = typeof answer === 'number' ? answer : Number(answer);
+    if(Number.isInteger(index) && Array.isArray(question.choices) && question.choices[index] !== undefined){
+      return `${String.fromCharCode(65 + index)}. ${question.choices[index]}`;
+    }
+    return answer ?? '';
+  }
+  if(question?.qtype==='tf'){
+    return String(answer).toLowerCase() === 'true' || answer === true ? 'True' : 'False';
+  }
+  return answer ?? '';
+}
+
+function openStudentAnswersSpreadsheet(submissionId){
+  const submission = data.submissions.find(s=>s.id===submissionId);
+  const exam = submission ? data.exams.find(e=>e.id===submission.examId) : null;
+  if(!submission || !exam){ toast('Submission details are not available.'); return; }
+
+  const savedReview = Array.isArray(submission.review) && submission.review.length
+    ? submission.review
+    : null;
+
+  const rowsHtml = (savedReview || (Array.isArray(submission.randomizedQuestions) ? submission.randomizedQuestions : exam.questions || [])).map((item, index) => {
+    const qText = item.q || item.text || `Question ${index + 1}`;
+    const qType = item.qtype || item.type || 'short';
+    const pts = item.pts || item.points || 1;
+    const fallbackChoices = Array.isArray(exam.questions?.[index]?.choices) ? exam.questions[index].choices : [];
+    const choices = Array.isArray(item.choices) && item.choices.length ? item.choices : fallbackChoices;
+
+    function formatAnswerLabel(answer, type, optionList){
+      const normalized = typeof answer === 'string' ? answer.trim() : answer;
+      if(type === 'mcq'){
+        const numericIndex = typeof normalized === 'number' ? normalized : Number(normalized);
+        if(Number.isInteger(numericIndex) && Array.isArray(optionList) && optionList[numericIndex] !== undefined){
+          return `${String.fromCharCode(65 + numericIndex)}. ${optionList[numericIndex]}`;
+        }
+        if(typeof normalized === 'string' && /^[A-Z]$/i.test(normalized)){
+          const letterIndex = normalized.toUpperCase().charCodeAt(0) - 65;
+          if(Array.isArray(optionList) && optionList[letterIndex] !== undefined){
+            return `${String.fromCharCode(65 + letterIndex)}. ${optionList[letterIndex]}`;
+          }
+        }
+        return String(normalized ?? '');
+      }
+      if(type === 'tf'){
+        if(Array.isArray(optionList) && optionList.length){
+          const matchingIndex = optionList.findIndex(choice => String(choice).toLowerCase() === String(normalized).toLowerCase());
+          if(matchingIndex >= 0){
+            return `${String.fromCharCode(65 + matchingIndex)}. ${optionList[matchingIndex]}`;
+          }
+        }
+        if(String(normalized).toLowerCase() === 'true' || normalized === true){
+          return 'True';
+        }
+        if(String(normalized).toLowerCase() === 'false' || normalized === false){
+          return 'False';
+        }
+        return String(normalized ?? '');
+      }
+      return String(normalized ?? '');
+    }
+
+    const studentAnswer = savedReview ? item.userAns : submission.answers?.[index];
+    const correctAnswer = savedReview ? item.correctAns : item.correct;
+
+    let studentAnswerText = formatAnswerLabel(studentAnswer, qType, choices);
+    let correctAnswerText = formatAnswerLabel(correctAnswer, qType, choices);
+
+    if(qType === 'short' || qType === 'essay'){
+      studentAnswerText = String(savedReview ? (item.userAns ?? '') : (submission.answers?.[index] ?? ''));
+      correctAnswerText = String(savedReview ? (item.correctAns ?? '') : (item.correct ?? ''));
+    }
+
+    return `<tr>
+      <td>${escHtml(qText)}</td>
+      <td>${escHtml(qType)}</td>
+      <td>${escHtml(studentAnswerText)}</td>
+      <td>${escHtml(correctAnswerText)}</td>
+      <td>${pts}</td>
+    </tr>`;
+  }).join('');
+
+  const modal = document.getElementById('answer-review-modal');
+  const title = document.getElementById('answer-review-title');
+  const body = document.getElementById('answer-review-body');
+
+  if(modal && title && body){
+    title.textContent = `${exam.title} — ${submission.studentName}`;
+    body.innerHTML = `<table class="mini-table"><thead><tr><th>Question</th><th>Type</th><th>Student Answer</th><th>Correct Answer</th><th>Points</th></tr></thead><tbody>${rowsHtml}</tbody></table>`;
+    modal.classList.add('show');
+  }
+
+  toast('Answer review opened.');
+}
+
+function closeAnswerReviewModal(){
+  document.getElementById('answer-review-modal')?.classList.remove('show');
 }
 
 function renderStudentResults(){
@@ -1140,23 +1524,12 @@ function buildAdminUI(){
         <div class="stat-card"><div class="icon">Assessments</div><div class="num" id="a-stat-exams">0</div><div class="lbl">Total Assessments</div></div>
         <div class="stat-card"><div class="icon">Sessions</div><div class="num" id="a-stat-sessions">0</div><div class="lbl">Active Sessions</div></div>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
-        <div class="card">
-          <div class="card-title">System Status</div>
-          <div style="font-size:.85rem;color:var(--muted);margin-top:.5rem">
-            <div style="display:flex;justify-content:space-between;padding:.4rem 0;border-bottom:1px solid var(--border)"><span>Backend Status</span><span id="a-backend-status" class="pill pill-green" style="font-size:.72rem">Online</span></div>
-            <div style="display:flex;justify-content:space-between;padding:.4rem 0;border-bottom:1px solid var(--border)"><span>Database</span><span class="pill pill-green" style="font-size:.72rem">Connected</span></div>
-            <div style="display:flex;justify-content:space-between;padding:.4rem 0;border-bottom:1px solid var(--border)"><span>Proctoring Engine</span><span id="a-proctor-status" class="pill pill-green" style="font-size:.72rem">Active</span></div>
-            <div style="display:flex;justify-content:space-between;padding:.4rem 0"><span>API Endpoints</span><span class="pill pill-green" style="font-size:.72rem">Operational</span></div>
-          </div>
-        </div>
-        <div class="card">
-          <div class="card-title">Quick Actions</div>
-          <div style="display:flex;flex-direction:column;gap:.5rem;margin-top:.5rem">
-            <button class="btn btn-primary" onclick="navAdmin('users',null);return false" style="justify-content:center">Create New User</button>
-            <button class="btn btn-primary" onclick="navAdmin('courses',null);return false" style="justify-content:center">Manage Courses</button>
-            <button class="btn btn-primary" onclick="navAdmin('exams',null);return false" style="justify-content:center">View All Assessments</button>
-          </div>
+      <div class="card">
+        <div class="card-title">Quick Actions</div>
+        <div style="display:flex;flex-direction:column;gap:.5rem;margin-top:.5rem">
+          <button class="btn btn-primary" onclick="navAdmin('users',null);return false" style="justify-content:center">Create New User</button>
+          <button class="btn btn-primary" onclick="navAdmin('courses',null);return false" style="justify-content:center">Manage Courses</button>
+          <button class="btn btn-primary" onclick="navAdmin('exams',null);return false" style="justify-content:center">View All Assessments</button>
         </div>
       </div>
       <div class="card">
@@ -1206,6 +1579,15 @@ function buildAdminUI(){
     <!-- SETTINGS -->
     <div class="page" id="page-settings">
       <div class="page-hdr"><div><h1>System Settings</h1></div></div>
+      <div class="card">
+        <div class="card-title">System Status</div>
+        <div style="font-size:.85rem;color:var(--muted);margin-top:.5rem">
+          <div style="display:flex;justify-content:space-between;padding:.4rem 0;border-bottom:1px solid var(--border)"><span>Backend Status</span><span id="a-backend-status" class="pill pill-green" style="font-size:.72rem">Online</span></div>
+          <div style="display:flex;justify-content:space-between;padding:.4rem 0;border-bottom:1px solid var(--border)"><span>Database</span><span class="pill pill-green" style="font-size:.72rem">Connected</span></div>
+          <div style="display:flex;justify-content:space-between;padding:.4rem 0;border-bottom:1px solid var(--border)"><span>Proctoring Engine</span><span id="a-proctor-status" class="pill pill-green" style="font-size:.72rem">Active</span></div>
+          <div style="display:flex;justify-content:space-between;padding:.4rem 0"><span>API Endpoints</span><span class="pill pill-green" style="font-size:.72rem">Operational</span></div>
+        </div>
+      </div>
       <div class="card">
         <div class="card-title">Proctoring Configuration</div>
         <div style="display:grid;gap:1rem;margin-top:.75rem">
@@ -1427,6 +1809,7 @@ function deleteAdminUser(userId){
 function deleteAdminCourse(courseId){
   if(!confirm('Delete this course? Associated exams will not be deleted.')) return;
   data.courses = data.courses.filter(c=>c.id!==courseId);
+  data.studentEnrollments = (data.studentEnrollments || []).filter(e=>e.courseId!==courseId);
   saveData();
   renderAdminCourses();
   toast('Course deleted.');
@@ -1596,10 +1979,15 @@ function renderQuestion(idx){
 
   const prevInline = document.getElementById('btn-prev-inline');
   const nextInline = document.getElementById('btn-next-inline');
+  const isLastQuestion = currentQ >= qs.length - 1;
   if(prevInline) prevInline.style.display = currentQ === 0 ? 'none' : '';
-  if(nextInline) nextInline.style.display = currentQ >= qs.length - 1 ? 'none' : '';
+  if(nextInline){
+    nextInline.style.display = '';
+    nextInline.textContent = isLastQuestion ? 'Submit Exam' : 'Next';
+    nextInline.onclick = isLastQuestion ? () => submitExam() : () => nextQ();
+  }
   const submitBtn = document.getElementById('btn-submit');
-  if(submitBtn) submitBtn.style.display = currentQ >= qs.length - 1 ? '' : 'none';
+  if(submitBtn) submitBtn.style.display = 'none';
   let html = '';
 
   if(showAllQuestions){
@@ -1682,7 +2070,29 @@ function submitExam(auto){
   const pct = total?Math.round(score/total*100):0;
   data = loadData();
   const submissionId = 's'+Date.now();
-  data.submissions.push({id:submissionId,examId:activeExam.id,studentName:STUDENT_NAME,score,total,pct,submittedAt:new Date().toISOString(),proctorData,backendSessionId});
+  const answerSnapshot = activeExam.questions.map((q, index) => answers[index]);
+  const randomizedQuestions = activeExam.questions.map(q => ({
+    text: q.text,
+    qtype: q.qtype,
+    points: q.points || 1,
+    choices: Array.isArray(q.choices) ? [...q.choices] : [],
+    correct: q.correct,
+    originalIndex: q.originalIndex
+  }));
+  data.submissions.push({
+    id:submissionId,
+    examId:activeExam.id,
+    studentName:STUDENT_NAME,
+    score,
+    total,
+    pct,
+    submittedAt:new Date().toISOString(),
+    proctorData,
+    backendSessionId,
+    review,
+    answers: answerSnapshot,
+    randomizedQuestions
+  });
   saveData();
   backendSubmitExam(submissionId, score, total, pct).then(result=>{
     if(!result) return;
