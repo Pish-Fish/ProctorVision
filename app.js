@@ -472,10 +472,54 @@ function setStudentAccountControlsVisible(visible){
   if(menu) menu.style.display = 'none';
 }
 
+function isMobileDevice(){
+  const ua = navigator.userAgent || navigator.vendor || '';
+  if(/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobile/i.test(ua)) return true;
+  // iPadOS 13+ reports as Macintosh with touch
+  if(navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) return true;
+  return false;
+}
+
+function showStudentDeviceBlock(){
+  const block = document.getElementById('student-device-block');
+  if(block) block.hidden = false;
+  document.getElementById('role-screen').style.display = 'none';
+  document.getElementById('app-shell').style.display = 'none';
+}
+
+function dismissStudentDeviceBlock(){
+  const block = document.getElementById('student-device-block');
+  if(block) block.hidden = true;
+  document.getElementById('role-screen').style.display = 'flex';
+  currentRole = null;
+}
+
+function setPortalBodyClass(role){
+  document.body.classList.remove('portal-admin','portal-teacher','portal-student','sidebar-open');
+  if(role) document.body.classList.add('portal-'+role);
+}
+
+function toggleAppNav(){
+  if(currentRole === 'student') return;
+  document.body.classList.toggle('sidebar-open');
+}
+
+function closeAppNav(){
+  document.body.classList.remove('sidebar-open');
+}
+
 function enterPortal(role){
+  if(role === 'student' && !isMobileDevice()){
+    showStudentDeviceBlock();
+    return;
+  }
   currentRole = role;
   data = loadData();
+  setPortalBodyClass(role);
+  closeAppNav();
   document.getElementById('role-screen').style.display = 'none';
+  const block = document.getElementById('student-device-block');
+  if(block) block.hidden = true;
   setStudentAccountControlsVisible(role === 'student');
   const shell = document.getElementById('app-shell');
   shell.style.display = 'flex';
@@ -540,6 +584,11 @@ function enterPortal(role){
 function switchPortal(){
   setStudentAccountControlsVisible(false);
   data = loadData();
+  currentRole = null;
+  setPortalBodyClass(null);
+  closeAppNav();
+  const tabbar = document.getElementById('student-tabbar');
+  if(tabbar) tabbar.innerHTML = '';
   document.getElementById('app-shell').style.display = 'none';
   document.getElementById('role-screen').style.display = 'flex';
   document.getElementById('sidebar').innerHTML = '';
@@ -660,6 +709,7 @@ function buildTeacherUI(){
 
 function navTeacher(page, el){
   data = loadData();
+  closeAppNav();
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('#sidebar a').forEach(a=>{ a.classList.remove('active'); a.style.background=''; });
   document.getElementById('page-'+page).classList.add('active');
@@ -1125,6 +1175,17 @@ function buildStudentUI(){
     a.addEventListener('mouseleave',()=>{ if(!a.classList.contains('active')) { a.style.background=''; a.style.color='#111827'; } });
   });
 
+  const tabbar = document.getElementById('student-tabbar');
+  if(tabbar){
+    tabbar.innerHTML = `
+      <a href="#" class="active" data-page="dashboard" onclick="return navStudent('dashboard',this)">Dashboard</a>
+      <a href="#" data-page="courses" onclick="return navStudent('courses',this)">Courses</a>
+      <a href="#" data-page="exams" onclick="return navStudent('exams',this)">Exams</a>
+      <a href="#" data-page="results" onclick="return navStudent('results',this)">Results</a>
+      <a href="#" data-page="profile" onclick="return navStudent('profile',this)">Profile</a>
+    `;
+  }
+
   const student = getCurrentStudent();
 
   document.getElementById('main-content').innerHTML = `
@@ -1137,7 +1198,7 @@ function buildStudentUI(){
         <div class="stat-card"><div class="icon">Completed</div><div class="num" id="sd-done">0</div><div class="lbl">Completed</div></div>
         <div class="stat-card"><div class="icon">Avg</div><div class="num" id="sd-avg">—</div><div class="lbl">Avg. Score</div></div>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
+      <div class="two-col-grid">
         <div class="card"><div class="card-title">Pending Assessments</div><div id="dash-pending"></div></div>
         <div class="card"><div class="card-title">Recent Scores</div><div id="dash-scores"></div></div>
       </div>
@@ -1164,13 +1225,13 @@ function buildStudentUI(){
     <!-- AVAILABLE EXAMS -->
     <div class="page" id="page-exams">
       <div class="page-hdr"><div><h1>Available Assessments</h1><p>Exams and quizzes published by your teachers</p></div></div>
-      <div class="card"><table><thead><tr><th>Title</th><th>Type</th><th>Course</th><th>Questions</th><th>Time Limit</th><th>Status</th><th>Action</th></tr></thead><tbody id="avail-tbody"></tbody></table></div>
+      <div class="card table-wrap"><table><thead><tr><th>Title</th><th>Type</th><th>Course</th><th>Questions</th><th>Time Limit</th><th>Status</th><th>Action</th></tr></thead><tbody id="avail-tbody"></tbody></table></div>
     </div>
 
     <!-- RESULTS -->
     <div class="page" id="page-results">
       <div class="page-hdr"><div><h1>My Results</h1><p>Your submission history and scores</p></div></div>
-      <div class="card"><table><thead><tr><th>Assessment</th><th>Course</th><th>Score</th><th>Submitted</th><th>Result</th></tr></thead><tbody id="s-results-tbody"></tbody></table></div>
+      <div class="card table-wrap"><table><thead><tr><th>Assessment</th><th>Course</th><th>Score</th><th>Submitted</th><th>Result</th></tr></thead><tbody id="s-results-tbody"></tbody></table></div>
     </div>
 
     <!-- PROFILE -->
@@ -1198,8 +1259,14 @@ function navStudent(page, el){
   data = loadData();
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('#sidebar a').forEach(a=>{ a.classList.remove('active'); a.style.background=''; });
+  document.querySelectorAll('#student-tabbar a').forEach(a=>a.classList.remove('active'));
   document.getElementById('page-'+page).classList.add('active');
-  if(el){ el.classList.add('active'); el.style.background='linear-gradient(90deg, #d4af37 0%, #f1de9a 100%)'; el.style.color='#111827'; }
+  const sidebarLink = document.querySelector(`#sidebar a[onclick*="'${page}'"]`);
+  if(sidebarLink){ sidebarLink.classList.add('active'); sidebarLink.style.background='linear-gradient(90deg, #d4af37 0%, #f1de9a 100%)'; sidebarLink.style.color='#111827'; }
+  const tabLink = document.querySelector(`#student-tabbar a[data-page="${page}"]`);
+  if(tabLink) tabLink.classList.add('active');
+  if(el && el.closest('#sidebar')){ el.classList.add('active'); el.style.background='linear-gradient(90deg, #d4af37 0%, #f1de9a 100%)'; el.style.color='#111827'; }
+  window.scrollTo(0,0);
   if(page==='dashboard') renderStudentDashboard();
   if(page==='courses') renderStudentCourses();
   // session page removed; monitoring is automatic when a student opens an exam
@@ -1637,6 +1704,7 @@ function buildAdminUI(){
 
 function navAdmin(page, el){
   data = loadData();
+  closeAppNav();
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('#sidebar a').forEach(a=>{ a.classList.remove('active'); a.style.background=''; });
   document.getElementById('page-'+page).classList.add('active');
@@ -2138,6 +2206,7 @@ function startProctoring(){
   window.addEventListener('contextmenu', handleContextMenu);
   window.addEventListener('keydown', handleKeydown);
   window.addEventListener('beforeunload', handleBeforeUnload);
+  installProctorCaptureHandlers();
   ensureCameraAccess();
   updateProctoringBadge(true);
 }
@@ -2152,9 +2221,57 @@ function stopProctoring(){
   window.removeEventListener('contextmenu', handleContextMenu);
   window.removeEventListener('keydown', handleKeydown);
   window.removeEventListener('beforeunload', handleBeforeUnload);
+  removeProctorCaptureHandlers();
   document.getElementById('exam-shell')?.classList.remove('proctoring-active');
   updateProctoringBadge(false);
   closeCameraStream();
+}
+
+function installProctorCaptureHandlers(){
+  document.addEventListener('copy', handleCopy, true);
+  document.addEventListener('cut', handleCut, true);
+  document.addEventListener('paste', handlePaste, true);
+  document.addEventListener('beforeinput', handleBeforeInput, true);
+  document.addEventListener('selectstart', handleSelectStart, true);
+  document.addEventListener('dragstart', handleDragStart, true);
+  document.addEventListener('contextmenu', handleContextMenu, true);
+  document.addEventListener('keydown', handleKeydown, true);
+}
+
+function removeProctorCaptureHandlers(){
+  document.removeEventListener('copy', handleCopy, true);
+  document.removeEventListener('cut', handleCut, true);
+  document.removeEventListener('paste', handlePaste, true);
+  document.removeEventListener('beforeinput', handleBeforeInput, true);
+  document.removeEventListener('selectstart', handleSelectStart, true);
+  document.removeEventListener('dragstart', handleDragStart, true);
+  document.removeEventListener('contextmenu', handleContextMenu, true);
+  document.removeEventListener('keydown', handleKeydown, true);
+}
+
+function handleBeforeInput(e){
+  if(!proctorSession) return;
+  if(e.inputType === 'insertFromPaste'){
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    recordProctorEvent('paste_attempt','Paste action blocked during exam',14);
+  }
+}
+
+function handleSelectStart(e){
+  if(!proctorSession) return;
+  if(document.activeElement?.tagName === 'TEXTAREA') return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  recordProctorEvent('selection_attempt','Text selection blocked during exam',10);
+}
+
+function handleDragStart(e){
+  if(!proctorSession) return;
+  if(document.activeElement?.tagName === 'TEXTAREA') return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  recordProctorEvent('drag_attempt','Drag selection blocked during exam',10);
 }
 
 function finalizeProctoring(){
@@ -2236,16 +2353,28 @@ function handleCopy(e){
   if(!proctorSession) return;
   if(document.activeElement?.tagName === 'TEXTAREA') return;
   e.preventDefault();
+  e.stopImmediatePropagation();
   recordProctorEvent('copy_attempt','Copy action blocked during exam',14);
 }
 function handleCut(e){
   if(!proctorSession) return;
   if(document.activeElement?.tagName === 'TEXTAREA') return;
   e.preventDefault();
+  e.stopImmediatePropagation();
   recordProctorEvent('copy_attempt','Cut action blocked during exam',14);
 }
-function handlePaste(e){ if(!proctorSession) return; e.preventDefault(); recordProctorEvent('paste_attempt','Paste action blocked during exam',14); }
-function handleContextMenu(e){ if(!proctorSession) return; e.preventDefault(); recordProctorEvent('context_menu','Right-click context menu blocked',8); }
+function handlePaste(e){
+  if(!proctorSession) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  recordProctorEvent('paste_attempt','Paste action blocked during exam',14);
+}
+function handleContextMenu(e){
+  if(!proctorSession) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  recordProctorEvent('context_menu','Right-click context menu blocked',8);
+}
 function handleBeforeUnload(e){ if(!proctorSession) return; e.preventDefault(); e.returnValue = ''; }
 
 function updateProctoringBadge(active){

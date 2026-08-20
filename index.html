@@ -2,13 +2,16 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+<meta name="theme-color" content="#1e3a8a"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="mobile-web-app-capable" content="yes"/>
 <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0"/>
 <meta http-equiv="Pragma" content="no-cache"/>
 <meta http-equiv="Expires" content="0"/>
 <title>ProctorVision</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Serif+Display&display=swap" rel="stylesheet"/>
-<link rel="stylesheet" href="styles.css?v=20260614"/>
+<link rel="stylesheet" href="styles.css?v=20260820"/>
 
 </head>
 <body>
@@ -47,6 +50,7 @@
 ═════════════════════════════════════════════ -->
 <div id="app-shell">
   <div class="topbar" id="topbar">
+    <button class="nav-toggle" id="nav-toggle" type="button" onclick="toggleAppNav()" aria-label="Open menu">☰</button>
     <div class="logo" id="topbar-logo">
       <img src="assets/imms-logo.jpg" alt="IMMS logo" class="brand-logo"/>
       <span class="brand-name">IMMS</span>
@@ -65,12 +69,23 @@
   </div>
 
   <div class="layout">
+    <div id="sidebar-backdrop" class="sidebar-backdrop" onclick="closeAppNav()"></div>
     <nav class="sidebar" id="sidebar">
       <!-- injected per role -->
     </nav>
     <main class="main" id="main-content">
       <!-- injected per role -->
     </main>
+  </div>
+  <nav class="student-tabbar" id="student-tabbar" aria-label="Student navigation"></nav>
+</div>
+
+<div id="student-device-block" class="device-block" hidden>
+  <div class="device-block-card">
+    <img src="assets/imms-logo.jpg" alt="IMMS logo" class="role-logo"/>
+    <h2>Student Portal</h2>
+    <p>you are a student, students are only permited to only use their account via mobile device</p>
+    <button class="btn btn-primary" type="button" onclick="dismissStudentDeviceBlock()">Back to portal selection</button>
   </div>
 </div>
 
@@ -297,7 +312,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/face-detection@1.0.2/dist/face-detection.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/dist/coco-ssd.min.js"></script>
 <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
-<script src="app.js?v=20260616"></script>
+<script src="app.js?v=20260820"></script>
 
 </body>
 </html>
